@@ -55,6 +55,8 @@ func startDiscordBot() {
 	session.UpdateGameStatus(0, "")
 	session.AddHandler(chatEventHandler)
 
+	session.Identify.Intents = discordgo.MakeIntent(discordgo.IntentsAll)
+
 	// open the websocket and begin listening.
 	err = session.Open()
 	if err != nil {
@@ -120,17 +122,15 @@ func chatEventHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	// ignore all messages created by the bot itself
 	author := m.Author
 	if author.ID == botID {
-		log.Println("New Discord Message (ignore all messages created by the bot itself):", m.Content)
 		return
 	}
 
 	guild, err := getGuildForChannel(s, m.ChannelID)
-	if err != nil {
+    if err != nil {
 		panic(err.Error())
-	}
+        }
 	authorMember, err := s.State.Member(guild.ID, author.ID)
 	if err != nil {
-		log.Println("New Discord Message (ignore non-member messages: '",err,"'):", m.Content)
 		// ignore non-member messages
 		return
 	}
@@ -140,13 +140,11 @@ func chatEventHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if len(commandMatches) == 0 { // this is a regular message
 		server, isServerLinked := serverList.getServerByChannelID(m.ChannelID)
 		if !isServerLinked {
-		log.Println("New Discord Message ( this channel isn't linked to any server, so just do nothing):", m.Content)
 			// this channel isn't linked to any server, so just do nothing
 			return
 		}
 
 		if server.isMuted(authorMember) {
-			log.Println("New Discord Message ( server.isMuted()):", m.Content)
 			return
 		}
 		nick := getMemberNickname(authorMember)
