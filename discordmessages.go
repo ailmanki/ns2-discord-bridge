@@ -322,10 +322,10 @@ func forwardStatusMessageToDiscord(server *Server, messagetype MessageType, mess
 
 	if messagetype.SubType == "changemap" {
 		if len(serverList) == 1 {
-			session.UpdateStatus(0, mapname)
+			session.UpdateGameStatus(0, mapname)
 			// session.UpdateStreamingStatus(0, "Natural Selection 2", "https://www.twitch.tv/naturalselection2")
 		} else {
-			session.UpdateStatus(0, "")
+			session.UpdateGameStatus(0, "")
 		}
 	}
 }
