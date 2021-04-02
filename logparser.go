@@ -11,6 +11,7 @@ import (
 	//"log"
 	"path/filepath"
 	"strings"
+	"log"
 )
 
 const fieldSep = ""
@@ -61,6 +62,8 @@ func findLogFile(logpath string) string {
 		}
 		return nil
 	})
+
+	log.Println("Found logfile: ", file)
 	return file
 }
 
@@ -71,6 +74,7 @@ func startLogParser() {
 		file, _ := os.Open(currlog)
 		reader  := bufio.NewReader(file)
 		go func() {
+
 			for { // Skip the initial stuff; yes, this isn't the most efficient way
 				line, _ := reader.ReadString('\n')
 				if len(line) == 0 {
@@ -81,8 +85,9 @@ func startLogParser() {
 			var slept    uint  = 0
 			//var filesize int64 = 0
 			for {
-				line, err := reader.ReadString('\n')
-				if err != nil && len(line) != 0 {
+				line, _ := reader.ReadString('\n')
+
+				if len(line) != 0 {
 					slept    = 0
 					//filesize = 0
 					if        matches := chat_regexp.FindStringSubmatch(line);       matches != nil {

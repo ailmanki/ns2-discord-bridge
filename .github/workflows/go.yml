@@ -18,12 +18,6 @@ jobs:
       with:
         go-version: 1.15
 
-    - name: Install dependencies
-      run: go install -v github.com/bwmarrin/discordgo
-
-    - name: Install dependencies
-      run: go install -v github.com/naoina/toml
-
     - name: Build
       run: go build -v ./...
 
