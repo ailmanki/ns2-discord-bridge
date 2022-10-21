@@ -5,7 +5,8 @@ import (
 	"log"
 )
 
-const version = "v6.0.1"
+const version = "v6.0.2"
+
 var configFile string
 
 // parse command line arguments
@@ -14,18 +15,17 @@ func init() {
 	flag.Parse()
 }
 
-
 func main() {
 	log.Println("Version", version)
 	Config.loadConfig(configFile)
 
 	for serverName, v := range Config.Servers {
 		serverList[serverName] = &Server{
-			Name : serverName,
-			Config : v,
-			Muted : v.Muted,
+			Name:   serverName,
+			Config: v,
+			Muted:  v.Muted,
 		}
-		log.Println("Linked server '"+ serverName +"' to channel", v.ChannelID)
+		log.Println("Linked server '"+serverName+"' to channel", v.ChannelID)
 	}
 
 	startDiscordBot()

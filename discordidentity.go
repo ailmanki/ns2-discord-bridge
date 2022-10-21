@@ -12,22 +12,18 @@ import (
 type DiscordIdentity string
 type DiscordIdentityList []DiscordIdentity
 
-
-func (d *DiscordIdentity) UnmarshalText(data []byte) error {
-	*d = DiscordIdentity(data)
-    return nil
+func (identity *DiscordIdentity) UnmarshalText(data []byte) error {
+	*identity = DiscordIdentity(data)
+	return nil
 }
 
-
-func (d DiscordIdentity) MarshalText() ([]byte, error) {
-    return []byte(d), nil
+func (identity DiscordIdentity) MarshalText() ([]byte, error) {
+	return []byte(identity), nil
 }
 
-
-func (d *DiscordIdentity) String() string {
-    return string(*d)
+func (identity *DiscordIdentity) String() string {
+	return string(*identity)
 }
-
 
 func (list DiscordIdentityList) isInList(member *discordgo.Member) bool {
 	for _, entry := range list {
@@ -37,7 +33,6 @@ func (list DiscordIdentityList) isInList(member *discordgo.Member) bool {
 	}
 	return false
 }
-
 
 func (list DiscordIdentityList) toMentionString(guild *discordgo.Guild) (response string) {
 	for _, mention := range list {
@@ -49,7 +44,6 @@ func (list DiscordIdentityList) toMentionString(guild *discordgo.Guild) (respons
 	}
 	return response
 }
-
 
 func (identity *DiscordIdentity) matches(member *discordgo.Member) bool {
 	if identity.matchesUser(member.User) {
@@ -66,7 +60,6 @@ func (identity *DiscordIdentity) matches(member *discordgo.Member) bool {
 	return false
 }
 
-
 func (identity *DiscordIdentity) matchesUser(user *discordgo.User) bool {
 	userName := user.Username + "#" + user.Discriminator
 	if string(*identity) == user.ID || string(*identity) == userName {
@@ -75,7 +68,6 @@ func (identity *DiscordIdentity) matchesUser(user *discordgo.User) bool {
 	return false
 }
 
-
 func (identity *DiscordIdentity) matchesRole(role *discordgo.Role) bool {
 	if string(*identity) == role.ID || string(*identity) == role.Name {
 		return true
@@ -83,9 +75,8 @@ func (identity *DiscordIdentity) matchesRole(role *discordgo.Role) bool {
 	return false
 }
 
-
 func (identity *DiscordIdentity) getUser(guild *discordgo.Guild) (*discordgo.User, error) {
-	for _, member:= range guild.Members {
+	for _, member := range guild.Members {
 		if identity.matchesUser(member.User) {
 			return member.User, nil
 		}
@@ -93,9 +84,8 @@ func (identity *DiscordIdentity) getUser(guild *discordgo.Guild) (*discordgo.Use
 	return nil, errors.New("No User '" + string(*identity) + "' not found")
 }
 
-
 func (identity *DiscordIdentity) getRole(guild *discordgo.Guild) (*discordgo.Role, error) {
-	for _, role  := range guild.Roles {
+	for _, role := range guild.Roles {
 		if identity.matchesRole(role) {
 			return role, nil
 		}

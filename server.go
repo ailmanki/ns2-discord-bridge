@@ -9,13 +9,14 @@ import (
 )
 
 type ServerList map[string]*Server
+
 var serverList ServerList
 
 type Server struct {
-	Name         string
-	Config       ServerConfig
-	Admins       DiscordIdentityList
-	Muted        DiscordIdentityList
+	Name   string
+	Config ServerConfig
+	Admins DiscordIdentityList
+	Muted  DiscordIdentityList
 }
 
 func init() {

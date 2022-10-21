@@ -3,38 +3,36 @@
 package main
 
 import (
-	"log"
-	"strings"
-	"strconv"
-	"errors"
-	"regexp"
-	"net/http"
-	"io/ioutil"
 	"encoding/json"
-	"net/url"
+	"errors"
 	"github.com/bwmarrin/discordgo"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 var (
-	botID string
-	session *discordgo.Session
+	botID          string
+	session        *discordgo.Session
 	commandPattern *regexp.Regexp
 )
 
-type ResponseHandler struct{
-	respond func(string)
-	session *discordgo.Session
-	message *discordgo.MessageCreate
-	guild *discordgo.Guild
-	author *discordgo.Member
+type ResponseHandler struct {
+	respond        func(string)
+	session        *discordgo.Session
+	message        *discordgo.MessageCreate
+	guild          *discordgo.Guild
+	author         *discordgo.Member
 	messageContent []string
 }
-
 
 func init() {
 	commandPattern, _ = regexp.Compile(`^!(\w+)(\s|$)`)
 }
-
 
 func startDiscordBot() {
 
@@ -67,7 +65,6 @@ func startDiscordBot() {
 	log.Println("Discord Bot is now running.")
 }
 
-
 func createResponseHandler(s *discordgo.Session, m *discordgo.MessageCreate, message []string) *ResponseHandler {
 	guild, err := getGuildForChannel(s, m.ChannelID)
 	if err != nil {
@@ -86,7 +83,6 @@ func createResponseHandler(s *discordgo.Session, m *discordgo.MessageCreate, mes
 	}
 }
 
-
 func getGuildForChannel(s *discordgo.Session, channelID string) (*discordgo.Guild, error) {
 	for _, guild := range s.State.Guilds {
 		channels, _ := s.GuildChannels(guild.ID)
@@ -99,14 +95,12 @@ func getGuildForChannel(s *discordgo.Session, channelID string) (*discordgo.Guil
 	return nil, errors.New("No guild for channel '" + channelID + "'")
 }
 
-
 func getUserNickname(user *discordgo.User, guild *discordgo.Guild) string {
 	if member, err := session.State.Member(guild.ID, user.ID); err == nil {
 		return getMemberNickname(member)
 	}
 	return user.Username
 }
-
 
 func getMemberNickname(member *discordgo.Member) string {
 	if member.Nick != "" {
@@ -115,9 +109,7 @@ func getMemberNickname(member *discordgo.Member) string {
 	return member.User.Username
 }
 
-
 func chatEventHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
-
 
 	// ignore all messages created by the bot itself
 	author := m.Author
@@ -126,9 +118,9 @@ func chatEventHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	guild, err := getGuildForChannel(s, m.ChannelID)
-    if err != nil {
+	if err != nil {
 		panic(err.Error())
-        }
+	}
 	authorMember, err := s.State.Member(guild.ID, author.ID)
 	if err != nil {
 		// ignore non-member messages
@@ -148,7 +140,7 @@ func chatEventHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			return
 		}
 		nick := getMemberNickname(authorMember)
-		v := url.Values {}
+		v := url.Values{}
 		v.Set("request", "discordsend")
 		v.Set("user", nick)
 		v.Set("msg", formatDiscordMessage(m))
@@ -165,31 +157,40 @@ func chatEventHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	messageFields := strings.Fields(m.Content)[1:]
 	responseHandler := createResponseHandler(s, m, messageFields)
 
-	// first handle the commands that dont require a linked server
+	// first handle the commands that don't require a linked server
 	switch commandMatches[1] {
-		case "mute": responseHandler.muteUser()
-		case "unmute": responseHandler.unmuteUser()
-		case "rcon": responseHandler.sendRconCommand()
-		case "info":  responseHandler.requestServerInfo()
-		case "status": responseHandler.requestServerStatus()
-		case "channelinfo": responseHandler.printChannelInfo()
-		case "version": responseHandler.printVersion()
-		default : fallthrough
-		case "commands": fallthrough
-		case "help": responseHandler.printHelpMessage()
+	case "mute":
+		responseHandler.muteUser()
+	case "unmute":
+		responseHandler.unmuteUser()
+	case "rcon":
+		responseHandler.sendRconCommand()
+	case "info":
+		responseHandler.requestServerInfo()
+	case "status":
+		responseHandler.requestServerStatus()
+	case "channelinfo":
+		responseHandler.printChannelInfo()
+	case "version":
+		responseHandler.printVersion()
+	default:
+		fallthrough
+	case "commands":
+		fallthrough
+	case "help":
+		responseHandler.printHelpMessage()
 	}
 }
-
 
 func (r *ResponseHandler) printChannelInfo() {
 	response := make([]string, 6)
 	response = append(response, "```")
 	channel, _ := r.session.State.Channel(r.message.ChannelID)
-	response = append(response, "Channel '" + channel.Name + "' Id: " + channel.ID)
+	response = append(response, "Channel '"+channel.Name+"' Id: "+channel.ID)
 	guild, _ := r.session.Guild(channel.GuildID)
-	response = append(response, "Guild '" + guild.Name + "' Id: " + guild.ID)
+	response = append(response, "Guild '"+guild.Name+"' Id: "+guild.ID)
 	for _, role := range guild.Roles {
-		response = append(response, "Role '" + role.Name + "' Id: " + role.ID)
+		response = append(response, "Role '"+role.Name+"' Id: "+role.ID)
 	}
 	for _, server := range serverList {
 		id := server.Config.ChannelID
@@ -198,17 +199,15 @@ func (r *ResponseHandler) printChannelInfo() {
 		if err == nil {
 			name = "<#" + linkedChannel.Name + ">"
 		}
-		response = append(response, "Server '" + server.Name + "' <-> Channel " + name + " (" + id + ")")
+		response = append(response, "Server '"+server.Name+"' <-> Channel "+name+" ("+id+")")
 	}
 	response = append(response, "```")
 	r.respond(strings.Join(response, "\n"))
 }
 
-
 func (r *ResponseHandler) printVersion() {
 	r.respond("Version " + version)
 }
-
 
 func (r *ResponseHandler) muteUser() {
 	server, isServerLinked := serverList.getServerByChannelID(r.message.ChannelID)
@@ -233,7 +232,6 @@ func (r *ResponseHandler) muteUser() {
 	r.respond("Muted " + strconv.Itoa(count) + " users")
 }
 
-
 func (r *ResponseHandler) unmuteUser() {
 	server, isServerLinked := serverList.getServerByChannelID(r.message.ChannelID)
 	if !isServerLinked {
@@ -252,13 +250,12 @@ func (r *ResponseHandler) unmuteUser() {
 			if mutedUser.matchesUser(mentionedUser) {
 				server.Muted = append(server.Muted[:i], server.Muted[i+1:]...)
 				count++
-				log.Println("Muted user", "'" + mentionedUser.Username + "#" + mentionedUser.Discriminator + "'", "id:", mentionedUser.ID)
+				log.Println("Muted user", "'"+mentionedUser.Username+"#"+mentionedUser.Discriminator+"'", "id:", mentionedUser.ID)
 			}
 		}
 	}
 	r.respond("Unmuted " + strconv.Itoa(count) + " user(s)")
 }
-
 
 func (r *ResponseHandler) requestServerStatus() {
 	server, isServerLinked := serverList.getServerByChannelID(r.message.ChannelID)
@@ -267,7 +264,7 @@ func (r *ResponseHandler) requestServerStatus() {
 		return
 	}
 
-	resp, err := http.PostForm(server.Config.WebAdmin, url.Values {
+	resp, err := http.PostForm(server.Config.WebAdmin, url.Values{
 		"request": {"discordinfo"},
 	})
 
@@ -275,12 +272,11 @@ func (r *ResponseHandler) requestServerStatus() {
 		log.Println(err.Error())
 	}
 
-	serverInfo := ServerInfo {}
+	serverInfo := ServerInfo{}
 	body, _ := ioutil.ReadAll(resp.Body)
 	_ = json.Unmarshal(body, &serverInfo)
 	forwardServerStatusToDiscord(server, MessageType{GroupType: "info", SubType: "status"}, serverInfo)
 }
-
 
 func (r *ResponseHandler) requestServerInfo() {
 	server, isServerLinked := serverList.getServerByChannelID(r.message.ChannelID)
@@ -289,7 +285,7 @@ func (r *ResponseHandler) requestServerInfo() {
 		return
 	}
 
-	resp, err := http.PostForm(server.Config.WebAdmin, url.Values {
+	resp, err := http.PostForm(server.Config.WebAdmin, url.Values{
 		"request": {"discordinfo"},
 	})
 
@@ -297,12 +293,11 @@ func (r *ResponseHandler) requestServerInfo() {
 		log.Println(err.Error())
 	}
 
-	serverInfo := ServerInfo {}
+	serverInfo := ServerInfo{}
 	body, _ := ioutil.ReadAll(resp.Body)
 	_ = json.Unmarshal(body, &serverInfo)
 	forwardServerStatusToDiscord(server, MessageType{GroupType: "info", SubType: "info"}, serverInfo)
 }
-
 
 func (r *ResponseHandler) sendRconCommand() {
 	server, isServerLinked := serverList.getServerByChannelID(r.message.ChannelID)
@@ -316,7 +311,7 @@ func (r *ResponseHandler) sendRconCommand() {
 		return
 	}
 
-	_, err := http.PostForm(server.Config.WebAdmin, url.Values {
+	_, err := http.PostForm(server.Config.WebAdmin, url.Values{
 		"rcon": {strings.Join(r.messageContent[:], " ")},
 	})
 
@@ -324,7 +319,6 @@ func (r *ResponseHandler) sendRconCommand() {
 		log.Println(err.Error())
 	}
 }
-
 
 func (r *ResponseHandler) printHelpMessage() {
 	r.respond("```" + `

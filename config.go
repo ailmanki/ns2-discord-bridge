@@ -1,18 +1,18 @@
 package main
 
 import (
+	"github.com/naoina/toml"
+	"io/ioutil"
 	"log"
 	"os"
-	"io/ioutil"
-	"github.com/naoina/toml"
 )
 
 type Configuration struct {
 	Discord struct {
-		Token string
+		Token        string
 		MessageStyle string
 	}
-	Messagestyles struct {
+	MessageStyles struct {
 		Rich MessageStyleRichConfig
 		Text MessageStyleTextConfig
 	}
@@ -57,14 +57,12 @@ type ServerConfig struct {
 
 var Config Configuration
 
-
 func (config *Configuration) getColor(color []int, defaultColor int) int {
 	if len(color) != 3 {
 		return defaultColor
 	}
 	return color[0]*256*256 + color[1]*256 + color[2]
 }
-
 
 func (config *Configuration) loadConfig(configFile string) {
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {

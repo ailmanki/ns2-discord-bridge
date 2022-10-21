@@ -3,32 +3,30 @@
 package main
 
 import (
-	"strings"
-	"regexp"
 	"github.com/bwmarrin/discordgo"
+	"regexp"
+	"strings"
 )
 
 var (
 	mentionPattern *regexp.Regexp
-	rolePattern *regexp.Regexp
+	rolePattern    *regexp.Regexp
 	channelPattern *regexp.Regexp
 )
 
-type Command struct {
-	Type    string `json:"type"`
-	User    string `json:"user"`
-	Message string `json:"msg"`
-}
-
+//type Command struct {
+//	Type    string `json:"type"`
+//	User    string `json:"user"`
+//	Message string `json:"msg"`
+//}
 
 func init() {
-	mentionPattern, _ = regexp.Compile(`[\\]?<@[!]?\d+>`)
-	rolePattern, _ = regexp.Compile(`[\\]?<@&\d+>`)
-	channelPattern, _ = regexp.Compile(`[\\]?<#\d+>`)
+	mentionPattern, _ = regexp.Compile(`\\?<@!?\d+>`)
+	rolePattern, _ = regexp.Compile(`\\?<@&\d+>`)
+	channelPattern, _ = regexp.Compile(`\\?<#\d+>`)
 }
 
-
-func mentionTranslator(mentions []*discordgo.User, guild *discordgo.Guild) (func(string) string) {
+func mentionTranslator(mentions []*discordgo.User, guild *discordgo.Guild) func(string) string {
 	return func(match string) string {
 		id := strings.Trim(match, "\\<@!>")
 		for _, mention := range mentions {
@@ -40,8 +38,7 @@ func mentionTranslator(mentions []*discordgo.User, guild *discordgo.Guild) (func
 	}
 }
 
-
-func roleTranslator(mentionRoles []string, guild *discordgo.Guild) (func(string) string) {
+func roleTranslator(guild *discordgo.Guild) func(string) string {
 	return func(match string) string {
 		roleID := strings.Trim(match, "\\<@&>")
 		role, err := session.State.Role(guild.ID, roleID)
@@ -52,8 +49,7 @@ func roleTranslator(mentionRoles []string, guild *discordgo.Guild) (func(string)
 	}
 }
 
-
-func channelTranslator(mentions []*discordgo.User, guild *discordgo.Guild) (func(string) string) {
+func channelTranslator() func(string) string {
 	return func(match string) string {
 		id := strings.Trim(match, "\\<#>")
 		if channel, err := session.State.Channel(id); err == nil {
@@ -63,7 +59,6 @@ func channelTranslator(mentions []*discordgo.User, guild *discordgo.Guild) (func
 		}
 	}
 }
-
 
 func getUnicodeToTextTranslator() *strings.Replacer {
 	return strings.NewReplacer(
@@ -81,16 +76,15 @@ func getUnicodeToTextTranslator() *strings.Replacer {
 	)
 }
 
-
 // formats a discord message so it looks good in-game
 func formatDiscordMessage(m *discordgo.MessageCreate) string {
 	guild, err := getGuildForChannel(session, m.ChannelID)
 	if err != nil {
 		panic(err.Error())
 	}
-	message := mentionPattern.ReplaceAllStringFunc(m.Content, mentionTranslator(m.Mentions, guild) )
-	message = rolePattern.ReplaceAllStringFunc(message, roleTranslator(m.MentionRoles, guild) )
-	message = channelPattern.ReplaceAllStringFunc(message, channelTranslator(m.Mentions, guild) )
+	message := mentionPattern.ReplaceAllStringFunc(m.Content, mentionTranslator(m.Mentions, guild))
+	message = rolePattern.ReplaceAllStringFunc(message, roleTranslator(guild))
+	message = channelPattern.ReplaceAllStringFunc(message, channelTranslator())
 	message = getUnicodeToTextTranslator().Replace(message)
 	return message
 }
