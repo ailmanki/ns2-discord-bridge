@@ -208,6 +208,11 @@ func truncateUTF8(s string, maxBytes int) string {
 		return s
 	}
 	
+	// Ensure we don't go beyond the string length
+	if maxBytes > len(s) {
+		maxBytes = len(s)
+	}
+	
 	// Find the last valid rune boundary before maxBytes
 	for i := maxBytes; i > 0; i-- {
 		if (s[i] & 0xC0) != 0x80 {
@@ -216,6 +221,15 @@ func truncateUTF8(s string, maxBytes int) string {
 		}
 	}
 	return ""
+}
+
+// sanitizePlayerNames sanitizes a list of player names for Discord display
+func sanitizePlayerNames(players []string) []string {
+	sanitized := make([]string, len(players))
+	for i, name := range players {
+		sanitized[i] = escapeDiscordMarkdown(name)
+	}
+	return sanitized
 }
 
 func buildTextChatMessage(server *Server, username string, teamNumber TeamNumber, message string) string {
@@ -472,27 +486,19 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 	fields := make([]*discordgo.MessageEmbedField, 0)
 
 	if messagetype.SubType == "info" && len(info.Teams) == 4 {
-		// Sanitize player names in each team
-		sanitizedMarinePlayers := make([]string, len(info.Teams["1"].Players))
-		for i, name := range info.Teams["1"].Players {
-			sanitizedMarinePlayers[i] = escapeDiscordMarkdown(name)
-		}
+		// Sanitize player names in each team using helper function
 		marineTeam := &discordgo.MessageEmbedField{
 			Name:   "Marines (" + strconv.Itoa(info.Teams["1"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(sanitizedMarinePlayers, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["1"].Players), "\n"),
 			Inline: true,
 		}
 		// Discord field value has a 1024 character limit
 		marineTeam.Value = truncateUTF8(marineTeam.Value, 1024)
 		fields = append(fields, marineTeam)
 
-		sanitizedAlienPlayers := make([]string, len(info.Teams["2"].Players))
-		for i, name := range info.Teams["2"].Players {
-			sanitizedAlienPlayers[i] = escapeDiscordMarkdown(name)
-		}
 		alienTeam := &discordgo.MessageEmbedField{
 			Name:   "Aliens (" + strconv.Itoa(info.Teams["2"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(sanitizedAlienPlayers, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["2"].Players), "\n"),
 			Inline: true,
 		}
 		alienTeam.Value = truncateUTF8(alienTeam.Value, 1024)
@@ -505,25 +511,17 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 		}
 		fields = append(fields, lineBreak)
 
-		sanitizedRRPlayers := make([]string, len(info.Teams["0"].Players))
-		for i, name := range info.Teams["0"].Players {
-			sanitizedRRPlayers[i] = escapeDiscordMarkdown(name)
-		}
 		rrTeam := &discordgo.MessageEmbedField{
 			Name:   "ReadyRoom (" + strconv.Itoa(info.Teams["0"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(sanitizedRRPlayers, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["0"].Players), "\n"),
 			Inline: true,
 		}
 		rrTeam.Value = truncateUTF8(rrTeam.Value, 1024)
 		fields = append(fields, rrTeam)
 
-		sanitizedSpecPlayers := make([]string, len(info.Teams["3"].Players))
-		for i, name := range info.Teams["3"].Players {
-			sanitizedSpecPlayers[i] = escapeDiscordMarkdown(name)
-		}
 		specTeam := &discordgo.MessageEmbedField{
 			Name:   "Spectators (" + strconv.Itoa(info.Teams["3"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(sanitizedSpecPlayers, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["3"].Players), "\n"),
 			Inline: true,
 		}
 		specTeam.Value = truncateUTF8(specTeam.Value, 1024)
