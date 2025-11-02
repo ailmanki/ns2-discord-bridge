@@ -143,6 +143,9 @@ func getTextToUnicodeTranslator() *strings.Replacer {
 // escapes Discord markdown characters to prevent unintended formatting
 // This is used for usernames and other text that shouldn't be formatted
 func escapeDiscordMarkdown(text string) string {
+	// First, validate and clean the text to prevent crashes
+	text = sanitizeForDiscord(text)
+	
 	replacer := strings.NewReplacer(
 		"\\", "\\\\",
 		"*", "\\*",
@@ -152,6 +155,62 @@ func escapeDiscordMarkdown(text string) string {
 		"|", "\\|",
 	)
 	return replacer.Replace(text)
+}
+
+// sanitizeForDiscord removes problematic characters that could crash Discord API calls
+// and enforces Discord's field length limits
+func sanitizeForDiscord(text string) string {
+	// Remove null bytes and other control characters that could break JSON encoding
+	replacer := strings.NewReplacer(
+		"\x00", "",  // null bytes
+		"\x01", "",  // start of heading
+		"\x02", "",  // start of text
+		"\x03", "",  // end of text
+		"\x04", "",  // end of transmission
+		"\x05", "",  // enquiry
+		"\x06", "",  // acknowledge
+		"\x07", "",  // bell
+		"\x08", "",  // backspace
+		"\x0b", "",  // vertical tab
+		"\x0c", "",  // form feed
+		"\x0e", "",  // shift out
+		"\x0f", "",  // shift in
+		"\x10", "",  // data link escape
+		"\x11", "",  // device control 1
+		"\x12", "",  // device control 2
+		"\x13", "",  // device control 3
+		"\x14", "",  // device control 4
+		"\x15", "",  // negative acknowledge
+		"\x16", "",  // synchronous idle
+		"\x17", "",  // end of transmission block
+		"\x18", "",  // cancel
+		"\x19", "",  // end of medium
+		"\x1a", "",  // substitute
+		"\x1b", "",  // escape
+		"\x1c", "",  // file separator
+		"\x1d", "",  // group separator
+		"\x1e", "",  // record separator
+		"\x1f", "",  // unit separator
+	)
+	text = replacer.Replace(text)
+	
+	// Ensure the text is valid UTF-8 by replacing invalid sequences
+	if !isValidUTF8(text) {
+		// Convert to valid UTF-8 by replacing invalid runes
+		text = strings.ToValidUTF8(text, "")
+	}
+	
+	// Discord embed author name has a 256 character limit
+	if len(text) > 256 {
+		text = text[:256]
+	}
+	
+	return text
+}
+
+// isValidUTF8 checks if a string is valid UTF-8
+func isValidUTF8(s string) bool {
+	return strings.ToValidUTF8(s, "\uFFFD") == s
 }
 
 func buildTextChatMessage(server *Server, username string, teamNumber TeamNumber, message string) string {
@@ -216,7 +275,13 @@ func triggerKeywords(server *Server, message string) {
 }
 
 func forwardChatMessageToDiscord(server *Server, username string, steamID SteamID3, teamNumber TeamNumber, message string) {
+	// Sanitize message content to prevent crashes from special characters
+	message = sanitizeForDiscord(message)
 	translatedMessage := getTextToUnicodeTranslator().Replace(message)
+	// Enforce Discord's embed description limit (4096 characters)
+	if len(translatedMessage) > 4096 {
+		translatedMessage = translatedMessage[:4096]
+	}
 	escapedUsername := escapeDiscordMarkdown(username)
 	switch Config.Discord.MessageStyle {
 	default:
@@ -286,6 +351,11 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 	case "leave":
 		eventText = escapedUsername + " left" + playerCount
 	}
+	
+	// Discord footer text has a 2048 character limit
+	if len(eventText) > 2048 {
+		eventText = eventText[:2048]
+	}
 
 	switch Config.Discord.MessageStyle {
 	default:
@@ -309,10 +379,19 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 }
 
 func forwardStatusMessageToDiscord(server *Server, messagetype MessageType, message string, playerCount string, mapname string) {
+	// Sanitize map name and status message to prevent crashes
+	mapname = sanitizeForDiscord(mapname)
+	message = sanitizeForDiscord(message)
+	
 	message += mapname
 
 	if playerCount != "" {
 		message += " (" + playerCount + ")"
+	}
+	
+	// Discord footer text has a 2048 character limit
+	if len(message) > 2048 {
+		message = message[:2048]
 	}
 
 	statusChannelID := server.Config.StatusChannelID
@@ -369,6 +448,11 @@ func forwardStatusMessageToDiscord(server *Server, messagetype MessageType, mess
 func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info ServerInfo) {
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05")
 	gameTimeSec, _ := math.Modf(info.GameTime)
+	
+	// Sanitize map and state names to prevent crashes
+	info.Map = sanitizeForDiscord(info.Map)
+	info.State = sanitizeForDiscord(info.State)
+	
 	description := ""
 	description += "**Map:** " + info.Map
 	description += "\n**State:** " + info.State + " (" + strconv.Itoa(int(gameTimeSec/60)) + "m " + strconv.Itoa(int(gameTimeSec)%60) + "s)"
@@ -389,17 +473,33 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 	fields := make([]*discordgo.MessageEmbedField, 0)
 
 	if messagetype.SubType == "info" && len(info.Teams) == 4 {
+		// Sanitize player names in each team
+		sanitizedMarinePlayers := make([]string, len(info.Teams["1"].Players))
+		for i, name := range info.Teams["1"].Players {
+			sanitizedMarinePlayers[i] = escapeDiscordMarkdown(name)
+		}
 		marineTeam := &discordgo.MessageEmbedField{
 			Name:   "Marines (" + strconv.Itoa(info.Teams["1"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["1"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizedMarinePlayers, "\n"),
 			Inline: true,
+		}
+		// Discord field value has a 1024 character limit
+		if len(marineTeam.Value) > 1024 {
+			marineTeam.Value = marineTeam.Value[:1024]
 		}
 		fields = append(fields, marineTeam)
 
+		sanitizedAlienPlayers := make([]string, len(info.Teams["2"].Players))
+		for i, name := range info.Teams["2"].Players {
+			sanitizedAlienPlayers[i] = escapeDiscordMarkdown(name)
+		}
 		alienTeam := &discordgo.MessageEmbedField{
 			Name:   "Aliens (" + strconv.Itoa(info.Teams["2"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["2"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizedAlienPlayers, "\n"),
 			Inline: true,
+		}
+		if len(alienTeam.Value) > 1024 {
+			alienTeam.Value = alienTeam.Value[:1024]
 		}
 		fields = append(fields, alienTeam)
 
@@ -410,43 +510,75 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 		}
 		fields = append(fields, lineBreak)
 
+		sanitizedRRPlayers := make([]string, len(info.Teams["0"].Players))
+		for i, name := range info.Teams["0"].Players {
+			sanitizedRRPlayers[i] = escapeDiscordMarkdown(name)
+		}
 		rrTeam := &discordgo.MessageEmbedField{
 			Name:   "ReadyRoom (" + strconv.Itoa(info.Teams["0"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["0"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizedRRPlayers, "\n"),
 			Inline: true,
+		}
+		if len(rrTeam.Value) > 1024 {
+			rrTeam.Value = rrTeam.Value[:1024]
 		}
 		fields = append(fields, rrTeam)
 
+		sanitizedSpecPlayers := make([]string, len(info.Teams["3"].Players))
+		for i, name := range info.Teams["3"].Players {
+			sanitizedSpecPlayers[i] = escapeDiscordMarkdown(name)
+		}
 		specTeam := &discordgo.MessageEmbedField{
 			Name:   "Spectators (" + strconv.Itoa(info.Teams["3"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["3"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizedSpecPlayers, "\n"),
 			Inline: true,
+		}
+		if len(specTeam.Value) > 1024 {
+			specTeam.Value = specTeam.Value[:1024]
 		}
 		fields = append(fields, specTeam)
 
 		mods := make([]string, 0)
 		for _, v := range info.Mods {
-			mods = append(mods, v.Name)
+			mods = append(mods, sanitizeForDiscord(v.Name))
 		}
 		modsField := &discordgo.MessageEmbedField{
 			Name:   "Mods",
 			Value:  "​" + strings.Join(mods[:], "\n"),
 			Inline: false,
 		}
+		if len(modsField.Value) > 1024 {
+			modsField.Value = modsField.Value[:1024]
+		}
 		fields = append(fields, modsField)
+	}
+
+	// Sanitize server name and info
+	serverName := sanitizeForDiscord(server.Name)
+	serverIpPort := sanitizeForDiscord(info.ServerIp + ":" + strconv.Itoa(info.ServerPort))
+	
+	// Enforce Discord limits
+	if len(serverName) > 256 {
+		serverName = serverName[:256]
+	}
+	if len(description) > 4096 {
+		description = description[:4096]
+	}
+	if len(serverIpPort) > 2048 {
+		serverIpPort = serverIpPort[:2048]
 	}
 
 	embed := &discordgo.MessageEmbed{
 		Color: messagetype.getColor(),
 		Author: &discordgo.MessageEmbedAuthor{
-			Name:    server.Name,
+			Name:    serverName,
 			IconURL: messagetype.getIcon(server),
 		},
 		Description: description,
 		Fields:      fields,
 		Timestamp:   timestamp,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: info.ServerIp + ":" + strconv.Itoa(info.ServerPort),
+			Text: serverIpPort,
 		},
 	}
 	_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)
