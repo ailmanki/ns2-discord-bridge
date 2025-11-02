@@ -62,17 +62,27 @@ func findLogFile(logpath string) string {
 	dir := filepath.Dir(logpath)
 	log.Printf("[LogParser] Directory to search: %q", dir)
 	
-	// Check if directory exists
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		log.Printf("[LogParser] WARNING: Directory does not exist: %q", dir)
+	// Check if directory exists and is accessible
+	dirInfo, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		log.Printf("[LogParser] ERROR: Directory does not exist: %q", dir)
+		log.Printf("[LogParser] Please check your log_file_path setting in config.toml")
+		log.Printf("[LogParser] The configured path was: %q", logpath)
+		return ""
+	} else if err != nil {
+		log.Printf("[LogParser] ERROR: Cannot access directory %q: %v", dir, err)
+		log.Printf("[LogParser] This might be a permissions issue")
 		return ""
 	}
+	
+	log.Printf("[LogParser] Directory found - Permissions: %v, Owner: %v", dirInfo.Mode(), dirInfo.Sys())
 	
 	prefix := dir + string(os.PathSeparator) + "log-Server"
 	log.Printf("[LogParser] Looking for files with prefix: %q", prefix)
 	
 	var file string
 	var modTime time.Time
+	fileCount := 0
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			log.Printf("[LogParser] Error walking path %q: %v", path, err)
@@ -80,20 +90,27 @@ func findLogFile(logpath string) string {
 		}
 		switch {
 		case path == dir:
+			// Skip the directory itself
 		case info.Mode().IsDir():
 			return filepath.SkipDir
-		case strings.HasPrefix(path, prefix) && info.ModTime().After(modTime):
+		case strings.HasPrefix(path, prefix):
+			fileCount++
 			log.Printf("[LogParser] Found candidate log file: %q (modified: %v)", path, info.ModTime())
-			modTime = info.ModTime()
-			file = path
+			if info.ModTime().After(modTime) {
+				modTime = info.ModTime()
+				file = path
+			}
 		}
 		return nil
 	})
 
 	if file == "" {
-		log.Printf("[LogParser] WARNING: No log files found matching prefix %q", prefix)
+		log.Printf("[LogParser] ERROR: No log files found matching prefix %q", prefix)
+		log.Printf("[LogParser] Searched in directory: %q", dir)
+		log.Printf("[LogParser] Files checked: %d", fileCount)
+		log.Printf("[LogParser] Make sure NS2 server log files exist and are readable")
 	} else {
-		log.Printf("[LogParser] Selected log file: %q", file)
+		log.Printf("[LogParser] Selected log file: %q (most recent of %d files)", file, fileCount)
 	}
 	return file
 }
@@ -113,6 +130,10 @@ func startLogParser() {
 		currlog := findLogFile(logfile)
 		if currlog == "" {
 			log.Printf("[LogParser] ERROR: Could not find log file for server '%s'", serverName)
+			log.Printf("[LogParser] Possible reasons:")
+			log.Printf("[LogParser]   1. The log_file_path directory doesn't exist")
+			log.Printf("[LogParser]   2. No log files matching 'log-Server*' in that directory")
+			log.Printf("[LogParser]   3. Incorrect permissions to access the directory/files")
 			continue
 		}
 		
