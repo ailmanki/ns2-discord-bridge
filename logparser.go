@@ -62,12 +62,43 @@ func findLogFile(logpath string) string {
 	dir := filepath.Dir(logpath)
 	log.Printf("[LogParser] Directory to search: %q", dir)
 	
+	// First, try to check if the exact configured file exists
+	if _, err := os.Stat(logpath); err == nil {
+		log.Printf("[LogParser] NOTE: Configured file exists directly: %q", logpath)
+		log.Printf("[LogParser] Using configured file directly instead of searching")
+		return logpath
+	} else {
+		log.Printf("[LogParser] Configured file check: %v", err)
+	}
+	
 	// Check if directory exists and is accessible
 	dirInfo, err := os.Stat(dir)
 	if os.IsNotExist(err) {
 		log.Printf("[LogParser] ERROR: Directory does not exist: %q", dir)
+		log.Printf("[LogParser] os.Stat error: %v (type: %T)", err, err)
+		
+		// Try to open directory to get more details
+		if f, openErr := os.Open(dir); openErr != nil {
+			log.Printf("[LogParser] os.Open error: %v (type: %T)", openErr, openErr)
+		} else {
+			f.Close()
+			log.Printf("[LogParser] STRANGE: os.Open succeeded but os.Stat failed!")
+		}
+		
+		// Try parent directory
+		parent := filepath.Dir(dir)
+		if parentInfo, parentErr := os.Stat(parent); parentErr != nil {
+			log.Printf("[LogParser] Parent directory %q also not accessible: %v", parent, parentErr)
+		} else {
+			log.Printf("[LogParser] Parent directory %q is accessible (permissions: %v)", parent, parentInfo.Mode())
+		}
+		
 		log.Printf("[LogParser] Please check your log_file_path setting in config.toml")
 		log.Printf("[LogParser] The configured path was: %q", logpath)
+		log.Printf("[LogParser] Possible causes:")
+		log.Printf("[LogParser]   - Systemd sandboxing (PrivateTmp, ProtectHome, ProtectSystem, etc.)")
+		log.Printf("[LogParser]   - Mount namespace isolation")
+		log.Printf("[LogParser]   - Path doesn't exist in this process's view of filesystem")
 		return ""
 	} else if os.IsPermission(err) {
 		log.Printf("[LogParser] ERROR: Permission denied accessing directory: %q", dir)
