@@ -9,13 +9,11 @@ const version = "v6.0.2"
 
 var configFile string
 
-// parse command line arguments
-func init() {
+func main() {
+	// parse command line arguments
 	flag.StringVar(&configFile, "c", "config.toml", "Specify Configuration File")
 	flag.Parse()
-}
-
-func main() {
+	
 	log.Println("Version", version)
 	Config.loadConfig(configFile)
 
