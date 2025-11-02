@@ -53,31 +53,69 @@ func init() {
 }
 
 func findLogFile(logpath string) string {
+	if logpath == "" {
+		log.Println("[LogParser] WARNING: log_file_path is empty in config!")
+		return ""
+	}
+	
+	log.Printf("[LogParser] Searching for log file based on path: %q", logpath)
 	dir := filepath.Dir(logpath)
+	log.Printf("[LogParser] Directory to search: %q", dir)
+	
+	// Check if directory exists
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		log.Printf("[LogParser] WARNING: Directory does not exist: %q", dir)
+		return ""
+	}
+	
 	prefix := dir + string(os.PathSeparator) + "log-Server"
+	log.Printf("[LogParser] Looking for files with prefix: %q", prefix)
+	
 	var file string
 	var modTime time.Time
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			log.Printf("[LogParser] Error walking path %q: %v", path, err)
+			return nil
+		}
 		switch {
 		case path == dir:
 		case info.Mode().IsDir():
 			return filepath.SkipDir
 		case strings.HasPrefix(path, prefix) && info.ModTime().After(modTime):
+			log.Printf("[LogParser] Found candidate log file: %q (modified: %v)", path, info.ModTime())
 			modTime = info.ModTime()
 			file = path
 		}
 		return nil
 	})
 
-	log.Println("Found logfile: ", file)
+	if file == "" {
+		log.Printf("[LogParser] WARNING: No log files found matching prefix %q", prefix)
+	} else {
+		log.Printf("[LogParser] Selected log file: %q", file)
+	}
 	return file
 }
 
 func startLogParser() {
 	for serverName, server := range serverList {
 		logfile := server.Config.LogFilePath
-		currlog := findLogFile(logfile)
 		log.Printf("[LogParser] Starting log parser for server '%s'", serverName)
+		log.Printf("[LogParser] Configured log_file_path: %q", logfile)
+		
+		if logfile == "" {
+			log.Printf("[LogParser] ERROR: log_file_path not configured for server '%s'", serverName)
+			log.Printf("[LogParser] Please set log_file_path in your config.toml for this server")
+			continue
+		}
+		
+		currlog := findLogFile(logfile)
+		if currlog == "" {
+			log.Printf("[LogParser] ERROR: Could not find log file for server '%s'", serverName)
+			continue
+		}
+		
 		log.Printf("[LogParser] Monitoring log file: %s", currlog)
 		file, err := os.Open(currlog)
 		if err != nil {
