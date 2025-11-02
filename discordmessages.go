@@ -140,21 +140,12 @@ func getTextToUnicodeTranslator() *strings.Replacer {
 	)
 }
 
-// escapes Discord markdown characters to prevent unintended formatting
-// This is used for usernames and other text that shouldn't be formatted
-func escapeDiscordMarkdown(text string) string {
-	// First, validate and clean the text to prevent crashes
+// sanitizeUsername sanitizes usernames for display in Discord
+// Discord embed Author.Name and Footer.Text fields don't interpret markdown,
+// so we only need to sanitize control characters and enforce length limits
+func sanitizeUsername(text string) string {
+	// Validate and clean the text to prevent crashes
 	text = sanitizeForDiscord(text)
-	
-	replacer := strings.NewReplacer(
-		"\\", "\\\\",
-		"*", "\\*",
-		"_", "\\_",
-		"~", "\\~",
-		"`", "\\`",
-		"|", "\\|",
-	)
-	text = replacer.Replace(text)
 	
 	// Enforce Discord's author name limit (256 characters)
 	return truncateUTF8(text, 256)
@@ -227,7 +218,7 @@ func truncateUTF8(s string, maxBytes int) string {
 func sanitizePlayerNames(players []string) []string {
 	sanitized := make([]string, len(players))
 	for i, name := range players {
-		sanitized[i] = escapeDiscordMarkdown(name)
+		sanitized[i] = sanitizeUsername(name)
 	}
 	return sanitized
 }
@@ -299,7 +290,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 	translatedMessage := getTextToUnicodeTranslator().Replace(message)
 	// Enforce Discord's embed description limit (4096 characters)
 	translatedMessage = truncateUTF8(translatedMessage, 4096)
-	escapedUsername := escapeDiscordMarkdown(username)
+	sanitizedUsername := sanitizeUsername(username)
 	switch Config.Discord.MessageStyle {
 	default:
 		fallthrough
@@ -310,7 +301,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 			lastAuthor := lastEmbed.Author
 			if lastMessageID == lastMultilineChatMessage.ID &&
 				lastEmbed.Color == teamNumber.getColor() &&
-				lastAuthor.Name == escapedUsername &&
+				lastAuthor.Name == sanitizedUsername &&
 				lastAuthor.URL == steamID.getSteamProfileLink() {
 				// append to last message
 				lastEmbed.Description += "\n" + translatedMessage
@@ -324,7 +315,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 			Color:       teamNumber.getColor(),
 			Author: &discordgo.MessageEmbedAuthor{
 				URL:     steamID.getSteamProfileLink(),
-				Name:    escapedUsername,
+				Name:    sanitizedUsername,
 				IconURL: steamID.getAvatar(),
 			},
 		}
@@ -334,14 +325,14 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 		embed := &discordgo.MessageEmbed{
 			Color: teamNumber.getColor(),
 			Footer: &discordgo.MessageEmbedFooter{
-				Text:    escapedUsername + ": " + translatedMessage,
+				Text:    sanitizedUsername + ": " + translatedMessage,
 				IconURL: steamID.getAvatar(),
 			},
 		}
 		_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)
 
 	case "text":
-		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextChatMessage(server, escapedUsername, teamNumber, translatedMessage))
+		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextChatMessage(server, sanitizedUsername, teamNumber, translatedMessage))
 	}
 
 	triggerKeywords(server, translatedMessage)
@@ -360,13 +351,13 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 		playerCount = " (" + playerCount + ")"
 	}
 
-	escapedUsername := escapeDiscordMarkdown(username)
+	sanitizedUsername := sanitizeUsername(username)
 	eventText := ""
 	switch messagetype.SubType {
 	case "join":
-		eventText = escapedUsername + " joined" + playerCount
+		eventText = sanitizedUsername + " joined" + playerCount
 	case "leave":
-		eventText = escapedUsername + " left" + playerCount
+		eventText = sanitizedUsername + " left" + playerCount
 	}
 	
 	// Discord footer text has a 2048 character limit
@@ -389,7 +380,7 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 		_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)
 
 	case "text":
-		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextPlayerEvent(server, messagetype, escapedUsername, playerCount))
+		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextPlayerEvent(server, messagetype, sanitizedUsername, playerCount))
 	}
 }
 
