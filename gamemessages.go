@@ -76,6 +76,20 @@ func getUnicodeToTextTranslator() *strings.Replacer {
 	)
 }
 
+// sanitizes special characters that could cause issues in the game
+// This applies to both messages and usernames
+func sanitizeForGame(text string) string {
+	// Replace control characters and newlines that could break parsing or display
+	replacer := strings.NewReplacer(
+		"\n", " ",      // newlines to spaces
+		"\r", " ",      // carriage returns to spaces
+		"\t", " ",      // tabs to spaces
+		"\x00", "",     // null bytes
+		"\x1e", "",     // record separator (field delimiter used in log parsing)
+	)
+	return replacer.Replace(text)
+}
+
 // formats a discord message so it looks good in-game
 func formatDiscordMessage(m *discordgo.MessageCreate) string {
 	guild, err := getGuildForChannel(session, m.ChannelID)
@@ -86,5 +100,6 @@ func formatDiscordMessage(m *discordgo.MessageCreate) string {
 	message = rolePattern.ReplaceAllStringFunc(message, roleTranslator(guild))
 	message = channelPattern.ReplaceAllStringFunc(message, channelTranslator())
 	message = getUnicodeToTextTranslator().Replace(message)
+	message = sanitizeForGame(message)
 	return message
 }

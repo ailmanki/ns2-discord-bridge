@@ -140,6 +140,20 @@ func getTextToUnicodeTranslator() *strings.Replacer {
 	)
 }
 
+// escapes Discord markdown characters to prevent unintended formatting
+// This is used for usernames and other text that shouldn't be formatted
+func escapeDiscordMarkdown(text string) string {
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		"*", "\\*",
+		"_", "\\_",
+		"~", "\\~",
+		"`", "\\`",
+		"|", "\\|",
+	)
+	return replacer.Replace(text)
+}
+
 func buildTextChatMessage(server *Server, username string, teamNumber TeamNumber, message string) string {
 	messageFormat := Config.MessageStyles.Text.ChatMessageFormat
 	teamSpecificString := teamNumber.getPrefix()
@@ -203,6 +217,7 @@ func triggerKeywords(server *Server, message string) {
 
 func forwardChatMessageToDiscord(server *Server, username string, steamID SteamID3, teamNumber TeamNumber, message string) {
 	translatedMessage := getTextToUnicodeTranslator().Replace(message)
+	escapedUsername := escapeDiscordMarkdown(username)
 	switch Config.Discord.MessageStyle {
 	default:
 		fallthrough
@@ -213,7 +228,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 			lastAuthor := lastEmbed.Author
 			if lastMessageID == lastMultilineChatMessage.ID &&
 				lastEmbed.Color == teamNumber.getColor() &&
-				lastAuthor.Name == username &&
+				lastAuthor.Name == escapedUsername &&
 				lastAuthor.URL == steamID.getSteamProfileLink() {
 				// append to last message
 				lastEmbed.Description += "\n" + translatedMessage
@@ -227,7 +242,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 			Color:       teamNumber.getColor(),
 			Author: &discordgo.MessageEmbedAuthor{
 				URL:     steamID.getSteamProfileLink(),
-				Name:    username,
+				Name:    escapedUsername,
 				IconURL: steamID.getAvatar(),
 			},
 		}
@@ -237,14 +252,14 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 		embed := &discordgo.MessageEmbed{
 			Color: teamNumber.getColor(),
 			Footer: &discordgo.MessageEmbedFooter{
-				Text:    username + ": " + translatedMessage,
+				Text:    escapedUsername + ": " + translatedMessage,
 				IconURL: steamID.getAvatar(),
 			},
 		}
 		_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)
 
 	case "text":
-		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextChatMessage(server, username, teamNumber, translatedMessage))
+		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextChatMessage(server, escapedUsername, teamNumber, translatedMessage))
 	}
 
 	triggerKeywords(server, translatedMessage)
@@ -263,12 +278,13 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 		playerCount = " (" + playerCount + ")"
 	}
 
+	escapedUsername := escapeDiscordMarkdown(username)
 	eventText := ""
 	switch messagetype.SubType {
 	case "join":
-		eventText = username + " joined" + playerCount
+		eventText = escapedUsername + " joined" + playerCount
 	case "leave":
-		eventText = username + " left" + playerCount
+		eventText = escapedUsername + " left" + playerCount
 	}
 
 	switch Config.Discord.MessageStyle {
@@ -288,7 +304,7 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 		_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)
 
 	case "text":
-		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextPlayerEvent(server, messagetype, username, playerCount))
+		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextPlayerEvent(server, messagetype, escapedUsername, playerCount))
 	}
 }
 
