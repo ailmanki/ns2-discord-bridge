@@ -140,6 +140,89 @@ func getTextToUnicodeTranslator() *strings.Replacer {
 	)
 }
 
+// sanitizeUsername sanitizes usernames for display in Discord
+// Discord embed Author.Name and Footer.Text fields don't interpret markdown,
+// so we only need to sanitize control characters and enforce length limits
+func sanitizeUsername(text string) string {
+	// Validate and clean the text to prevent crashes
+	text = sanitizeForDiscord(text)
+	
+	// Enforce Discord's author name limit (256 characters)
+	return truncateUTF8(text, 256)
+}
+
+// sanitizeForDiscord removes problematic characters that could crash Discord API calls
+func sanitizeForDiscord(text string) string {
+	// Remove null bytes and other control characters that could break JSON encoding
+	replacer := strings.NewReplacer(
+		"\x00", "",  // null bytes
+		"\x01", "",  // start of heading
+		"\x02", "",  // start of text
+		"\x03", "",  // end of text
+		"\x04", "",  // end of transmission
+		"\x05", "",  // enquiry
+		"\x06", "",  // acknowledge
+		"\x07", "",  // bell
+		"\x08", "",  // backspace
+		"\x0b", "",  // vertical tab
+		"\x0c", "",  // form feed
+		"\x0e", "",  // shift out
+		"\x0f", "",  // shift in
+		"\x10", "",  // data link escape
+		"\x11", "",  // device control 1
+		"\x12", "",  // device control 2
+		"\x13", "",  // device control 3
+		"\x14", "",  // device control 4
+		"\x15", "",  // negative acknowledge
+		"\x16", "",  // synchronous idle
+		"\x17", "",  // end of transmission block
+		"\x18", "",  // cancel
+		"\x19", "",  // end of medium
+		"\x1a", "",  // substitute
+		"\x1b", "",  // escape
+		"\x1c", "",  // file separator
+		"\x1d", "",  // group separator
+		"\x1e", "",  // record separator
+		"\x1f", "",  // unit separator
+	)
+	text = replacer.Replace(text)
+	
+	// Ensure the text is valid UTF-8 by replacing invalid sequences
+	text = strings.ToValidUTF8(text, "")
+	
+	return text
+}
+
+// truncateUTF8 safely truncates a UTF-8 string to maxBytes without breaking multi-byte characters
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	
+	// Ensure we don't go beyond the string length
+	if maxBytes > len(s) {
+		maxBytes = len(s)
+	}
+	
+	// Find the last valid rune boundary before maxBytes
+	for i := maxBytes; i > 0; i-- {
+		if (s[i] & 0xC0) != 0x80 {
+			// Found the start of a rune
+			return s[:i]
+		}
+	}
+	return ""
+}
+
+// sanitizePlayerNames sanitizes a list of player names for Discord display
+func sanitizePlayerNames(players []string) []string {
+	sanitized := make([]string, len(players))
+	for i, name := range players {
+		sanitized[i] = sanitizeUsername(name)
+	}
+	return sanitized
+}
+
 func buildTextChatMessage(server *Server, username string, teamNumber TeamNumber, message string) string {
 	messageFormat := Config.MessageStyles.Text.ChatMessageFormat
 	teamSpecificString := teamNumber.getPrefix()
@@ -202,7 +285,12 @@ func triggerKeywords(server *Server, message string) {
 }
 
 func forwardChatMessageToDiscord(server *Server, username string, steamID SteamID3, teamNumber TeamNumber, message string) {
+	// Sanitize message content to prevent crashes from special characters
+	message = sanitizeForDiscord(message)
 	translatedMessage := getTextToUnicodeTranslator().Replace(message)
+	// Enforce Discord's embed description limit (4096 characters)
+	translatedMessage = truncateUTF8(translatedMessage, 4096)
+	sanitizedUsername := sanitizeUsername(username)
 	switch Config.Discord.MessageStyle {
 	default:
 		fallthrough
@@ -213,7 +301,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 			lastAuthor := lastEmbed.Author
 			if lastMessageID == lastMultilineChatMessage.ID &&
 				lastEmbed.Color == teamNumber.getColor() &&
-				lastAuthor.Name == username &&
+				lastAuthor.Name == sanitizedUsername &&
 				lastAuthor.URL == steamID.getSteamProfileLink() {
 				// append to last message
 				lastEmbed.Description += "\n" + translatedMessage
@@ -227,7 +315,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 			Color:       teamNumber.getColor(),
 			Author: &discordgo.MessageEmbedAuthor{
 				URL:     steamID.getSteamProfileLink(),
-				Name:    username,
+				Name:    sanitizedUsername,
 				IconURL: steamID.getAvatar(),
 			},
 		}
@@ -237,14 +325,14 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 		embed := &discordgo.MessageEmbed{
 			Color: teamNumber.getColor(),
 			Footer: &discordgo.MessageEmbedFooter{
-				Text:    username + ": " + translatedMessage,
+				Text:    sanitizedUsername + ": " + translatedMessage,
 				IconURL: steamID.getAvatar(),
 			},
 		}
 		_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)
 
 	case "text":
-		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextChatMessage(server, username, teamNumber, translatedMessage))
+		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextChatMessage(server, sanitizedUsername, teamNumber, translatedMessage))
 	}
 
 	triggerKeywords(server, translatedMessage)
@@ -263,13 +351,17 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 		playerCount = " (" + playerCount + ")"
 	}
 
+	sanitizedUsername := sanitizeUsername(username)
 	eventText := ""
 	switch messagetype.SubType {
 	case "join":
-		eventText = username + " joined" + playerCount
+		eventText = sanitizedUsername + " joined" + playerCount
 	case "leave":
-		eventText = username + " left" + playerCount
+		eventText = sanitizedUsername + " left" + playerCount
 	}
+	
+	// Discord footer text has a 2048 character limit
+	eventText = truncateUTF8(eventText, 2048)
 
 	switch Config.Discord.MessageStyle {
 	default:
@@ -288,16 +380,23 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 		_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)
 
 	case "text":
-		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextPlayerEvent(server, messagetype, username, playerCount))
+		_, _ = session.ChannelMessageSend(server.Config.ChannelID, buildTextPlayerEvent(server, messagetype, sanitizedUsername, playerCount))
 	}
 }
 
 func forwardStatusMessageToDiscord(server *Server, messagetype MessageType, message string, playerCount string, mapname string) {
+	// Sanitize map name and status message to prevent crashes
+	mapname = sanitizeForDiscord(mapname)
+	message = sanitizeForDiscord(message)
+	
 	message += mapname
 
 	if playerCount != "" {
 		message += " (" + playerCount + ")"
 	}
+	
+	// Discord footer text has a 2048 character limit
+	message = truncateUTF8(message, 2048)
 
 	statusChannelID := server.Config.StatusChannelID
 
@@ -353,6 +452,11 @@ func forwardStatusMessageToDiscord(server *Server, messagetype MessageType, mess
 func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info ServerInfo) {
 	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05")
 	gameTimeSec, _ := math.Modf(info.GameTime)
+	
+	// Sanitize map and state names to prevent crashes
+	info.Map = sanitizeForDiscord(info.Map)
+	info.State = sanitizeForDiscord(info.State)
+	
 	description := ""
 	description += "**Map:** " + info.Map
 	description += "\n**State:** " + info.State + " (" + strconv.Itoa(int(gameTimeSec/60)) + "m " + strconv.Itoa(int(gameTimeSec)%60) + "s)"
@@ -373,18 +477,22 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 	fields := make([]*discordgo.MessageEmbedField, 0)
 
 	if messagetype.SubType == "info" && len(info.Teams) == 4 {
+		// Sanitize player names in each team using helper function
 		marineTeam := &discordgo.MessageEmbedField{
 			Name:   "Marines (" + strconv.Itoa(info.Teams["1"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["1"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["1"].Players), "\n"),
 			Inline: true,
 		}
+		// Discord field value has a 1024 character limit
+		marineTeam.Value = truncateUTF8(marineTeam.Value, 1024)
 		fields = append(fields, marineTeam)
 
 		alienTeam := &discordgo.MessageEmbedField{
 			Name:   "Aliens (" + strconv.Itoa(info.Teams["2"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["2"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["2"].Players), "\n"),
 			Inline: true,
 		}
+		alienTeam.Value = truncateUTF8(alienTeam.Value, 1024)
 		fields = append(fields, alienTeam)
 
 		lineBreak := &discordgo.MessageEmbedField{
@@ -396,41 +504,53 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 
 		rrTeam := &discordgo.MessageEmbedField{
 			Name:   "ReadyRoom (" + strconv.Itoa(info.Teams["0"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["0"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["0"].Players), "\n"),
 			Inline: true,
 		}
+		rrTeam.Value = truncateUTF8(rrTeam.Value, 1024)
 		fields = append(fields, rrTeam)
 
 		specTeam := &discordgo.MessageEmbedField{
 			Name:   "Spectators (" + strconv.Itoa(info.Teams["3"].NumPlayers) + " Players)",
-			Value:  "​" + strings.Join(info.Teams["3"].Players, "\n"),
+			Value:  "​" + strings.Join(sanitizePlayerNames(info.Teams["3"].Players), "\n"),
 			Inline: true,
 		}
+		specTeam.Value = truncateUTF8(specTeam.Value, 1024)
 		fields = append(fields, specTeam)
 
 		mods := make([]string, 0)
 		for _, v := range info.Mods {
-			mods = append(mods, v.Name)
+			mods = append(mods, sanitizeForDiscord(v.Name))
 		}
 		modsField := &discordgo.MessageEmbedField{
 			Name:   "Mods",
 			Value:  "​" + strings.Join(mods[:], "\n"),
 			Inline: false,
 		}
+		modsField.Value = truncateUTF8(modsField.Value, 1024)
 		fields = append(fields, modsField)
 	}
+
+	// Sanitize server name and info
+	serverName := sanitizeForDiscord(server.Name)
+	serverIpPort := sanitizeForDiscord(info.ServerIp + ":" + strconv.Itoa(info.ServerPort))
+	
+	// Enforce Discord limits with safe UTF-8 truncation
+	serverName = truncateUTF8(serverName, 256)
+	description = truncateUTF8(description, 4096)
+	serverIpPort = truncateUTF8(serverIpPort, 2048)
 
 	embed := &discordgo.MessageEmbed{
 		Color: messagetype.getColor(),
 		Author: &discordgo.MessageEmbedAuthor{
-			Name:    server.Name,
+			Name:    serverName,
 			IconURL: messagetype.getIcon(server),
 		},
 		Description: description,
 		Fields:      fields,
 		Timestamp:   timestamp,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: info.ServerIp + ":" + strconv.Itoa(info.ServerPort),
+			Text: serverIpPort,
 		},
 	}
 	_, _ = session.ChannelMessageSendEmbed(server.Config.ChannelID, embed)

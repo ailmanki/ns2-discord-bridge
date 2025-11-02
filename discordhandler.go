@@ -139,7 +139,7 @@ func chatEventHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if server.isMuted(authorMember) {
 			return
 		}
-		nick := getMemberNickname(authorMember)
+		nick := sanitizeForGame(getMemberNickname(authorMember))
 		v := url.Values{}
 		v.Set("request", "discordsend")
 		v.Set("user", nick)
