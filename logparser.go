@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const fieldSep = ""
+const fieldSep = "\\|"
 const regexPrefix = "^\\[[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\]--DISCORD--\\|"
 
 var (
