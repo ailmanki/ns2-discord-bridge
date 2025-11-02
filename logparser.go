@@ -4,17 +4,17 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"os"
 	"regexp"
 	"strconv"
 	"time"
-	//"log"
 	"path/filepath"
 	"strings"
 )
 
-const fieldSep = "\\|"
+const fieldSep = ""
 const regexPrefix = "^\\[[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\]--DISCORD--\\|"
 
 var (
@@ -46,6 +46,12 @@ var (
 		fieldSep + "(.*)\n") // message
 )
 
+func init() {
+	// Log the regex patterns at startup for debugging
+	log.Println("[LogParser] Field separator (hex):", strings.ToUpper(fmt.Sprintf("%x", fieldSep)))
+	log.Println("[LogParser] Chat regex pattern:", chatRegexp.String())
+}
+
 func findLogFile(logpath string) string {
 	dir := filepath.Dir(logpath)
 	prefix := dir + string(os.PathSeparator) + "log-Server"
@@ -68,33 +74,63 @@ func findLogFile(logpath string) string {
 }
 
 func startLogParser() {
-	for _, server := range serverList {
+	for serverName, server := range serverList {
 		logfile := server.Config.LogFilePath
 		currlog := findLogFile(logfile)
-		file, _ := os.Open(currlog)
+		log.Printf("[LogParser] Starting log parser for server '%s'", serverName)
+		log.Printf("[LogParser] Monitoring log file: %s", currlog)
+		file, err := os.Open(currlog)
+		if err != nil {
+			log.Printf("[LogParser] ERROR: Failed to open log file '%s': %v", currlog, err)
+			continue
+		}
 		reader := bufio.NewReader(file)
-		go func() {
-
+		go func(serverName string, server *Server) {
+			log.Printf("[LogParser] '%s': Skipping initial log content...", serverName)
 			for { // Skip the initial stuff; yes, this isn't the most efficient way
 				line, _ := reader.ReadString('\n')
 				if len(line) == 0 {
 					break
 				}
 			}
+			log.Printf("[LogParser] '%s': Ready to process new log entries", serverName)
 
 			var slept uint = 0
 			//var filesize int64 = 0
 			for {
-				line, _ := reader.ReadString('\n')
+				line, err := reader.ReadString('\n')
+				if err != nil && len(line) == 0 {
+					// End of file, will retry
+					slept += 1
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
 
 				if len(line) != 0 {
 					slept = 0
 					//filesize = 0
+					
+					// Check if line contains DISCORD marker
+					if strings.Contains(line, "--DISCORD--") {
+						log.Printf("[LogParser] '%s': Found DISCORD line: %q", serverName, line)
+						
+						// Show the line with visible separators for debugging
+						visibleLine := strings.ReplaceAll(line, "\x1e", "[SEP]")
+						log.Printf("[LogParser] '%s': Line with visible separators: %q", serverName, visibleLine)
+					}
+					
 					if matches := chatRegexp.FindStringSubmatch(line); matches != nil {
+						log.Printf("[LogParser] '%s': Matched CHAT message - Name: %q, SteamID: %q, Team: %q, Message: %q", 
+							serverName, matches[1], matches[2], matches[3], matches[4])
+						log.Printf("[LogParser] '%s': Matched CHAT message - Name: %q, SteamID: %q, Team: %q, Message: %q", 
+							serverName, matches[1], matches[2], matches[3], matches[4])
 						steamid, _ := strconv.ParseInt(matches[2], 10, 32)
 						teamNumber, _ := strconv.Atoi(matches[3])
+						log.Printf("[LogParser] '%s': Forwarding chat message to Discord...", serverName)
 						forwardChatMessageToDiscord(server, matches[1], SteamID3(steamid), TeamNumber(teamNumber), matches[4])
 					} else if matches := statusRegexp.FindStringSubmatch(line); matches != nil {
+						log.Printf("[LogParser] '%s': Matched STATUS message - State: %q, Map: %q, Players: %q", 
+							serverName, matches[1], matches[2], matches[3])
 						gamestate := matches[1]
 						currmap := matches[2]
 						players := matches[3]
@@ -125,17 +161,25 @@ func startLogParser() {
 						default:
 							continue
 						}
+						log.Printf("[LogParser] '%s': Forwarding status message to Discord: %s", serverName, message+currmap)
 						forwardStatusMessageToDiscord(server, msgtype, message, players, currmap)
 					} else if matches := changemapRegexp.FindStringSubmatch(line); matches != nil {
+						log.Printf("[LogParser] '%s': Matched CHANGEMAP - Map: %q, Players: %q", 
+							serverName, matches[1], matches[2])
 						nextmap := matches[1]
 						players := matches[2]
 						message := "Changing map to "
+						log.Printf("[LogParser] '%s': Forwarding changemap to Discord", serverName)
 						forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "changemap"}, message, players, nextmap)
 					} else if matches := initRegexp.FindStringSubmatch(line); matches != nil {
+						log.Printf("[LogParser] '%s': Matched INIT - Map: %q", serverName, matches[1])
 						currmap := matches[1]
 						message := "Loaded "
+						log.Printf("[LogParser] '%s': Forwarding init to Discord", serverName)
 						forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, message, "", currmap)
 					} else if matches := playerRegexp.FindStringSubmatch(line); matches != nil {
+						log.Printf("[LogParser] '%s': Matched PLAYER event - Action: %q, Name: %q, SteamID: %q, Players: %q", 
+							serverName, matches[1], matches[2], matches[3], matches[4])
 						action := matches[1]
 						name := matches[2]
 						steamid, _ := strconv.ParseInt(matches[3], 10, 32)
@@ -144,9 +188,16 @@ func startLogParser() {
 							GroupType: "player",
 							SubType:   action,
 						}
+						log.Printf("[LogParser] '%s': Forwarding player event to Discord", serverName)
 						forwardPlayerEventToDiscord(server, msgtype, name, SteamID3(steamid), players)
 					} else if matches := adminprintRegexp.FindStringSubmatch(line); matches != nil {
+						log.Printf("[LogParser] '%s': Matched ADMINPRINT - Message: %q", serverName, matches[1])
+						log.Printf("[LogParser] '%s': Forwarding adminprint to Discord", serverName)
 						forwardStatusMessageToDiscord(server, MessageType{GroupType: "adminprint"}, matches[1], "", "")
+					} else if strings.Contains(line, "--DISCORD--") {
+						// Line contains DISCORD marker but didn't match any pattern
+						log.Printf("[LogParser] '%s': WARNING - DISCORD line did not match any pattern!", serverName)
+						log.Printf("[LogParser] '%s': Regex patterns expecting separator: %q", serverName, fieldSep)
 					}
 				} else if slept >= 5 { // Check if server has restarted
 					slept = 0
@@ -197,6 +248,6 @@ func startLogParser() {
 					time.Sleep(500 * time.Millisecond)
 				}
 			}
-		}()
+		}(serverName, server)
 	}
 }
