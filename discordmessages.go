@@ -154,11 +154,13 @@ func escapeDiscordMarkdown(text string) string {
 		"`", "\\`",
 		"|", "\\|",
 	)
-	return replacer.Replace(text)
+	text = replacer.Replace(text)
+	
+	// Enforce Discord's author name limit (256 characters)
+	return truncateUTF8(text, 256)
 }
 
 // sanitizeForDiscord removes problematic characters that could crash Discord API calls
-// and enforces Discord's field length limits
 func sanitizeForDiscord(text string) string {
 	// Remove null bytes and other control characters that could break JSON encoding
 	replacer := strings.NewReplacer(
@@ -195,22 +197,25 @@ func sanitizeForDiscord(text string) string {
 	text = replacer.Replace(text)
 	
 	// Ensure the text is valid UTF-8 by replacing invalid sequences
-	if !isValidUTF8(text) {
-		// Convert to valid UTF-8 by replacing invalid runes
-		text = strings.ToValidUTF8(text, "")
-	}
-	
-	// Discord embed author name has a 256 character limit
-	if len(text) > 256 {
-		text = text[:256]
-	}
+	text = strings.ToValidUTF8(text, "")
 	
 	return text
 }
 
-// isValidUTF8 checks if a string is valid UTF-8
-func isValidUTF8(s string) bool {
-	return strings.ToValidUTF8(s, "\uFFFD") == s
+// truncateUTF8 safely truncates a UTF-8 string to maxBytes without breaking multi-byte characters
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	
+	// Find the last valid rune boundary before maxBytes
+	for i := maxBytes; i > 0; i-- {
+		if (s[i] & 0xC0) != 0x80 {
+			// Found the start of a rune
+			return s[:i]
+		}
+	}
+	return ""
 }
 
 func buildTextChatMessage(server *Server, username string, teamNumber TeamNumber, message string) string {
@@ -279,9 +284,7 @@ func forwardChatMessageToDiscord(server *Server, username string, steamID SteamI
 	message = sanitizeForDiscord(message)
 	translatedMessage := getTextToUnicodeTranslator().Replace(message)
 	// Enforce Discord's embed description limit (4096 characters)
-	if len(translatedMessage) > 4096 {
-		translatedMessage = translatedMessage[:4096]
-	}
+	translatedMessage = truncateUTF8(translatedMessage, 4096)
 	escapedUsername := escapeDiscordMarkdown(username)
 	switch Config.Discord.MessageStyle {
 	default:
@@ -353,9 +356,7 @@ func forwardPlayerEventToDiscord(server *Server, messagetype MessageType, userna
 	}
 	
 	// Discord footer text has a 2048 character limit
-	if len(eventText) > 2048 {
-		eventText = eventText[:2048]
-	}
+	eventText = truncateUTF8(eventText, 2048)
 
 	switch Config.Discord.MessageStyle {
 	default:
@@ -390,9 +391,7 @@ func forwardStatusMessageToDiscord(server *Server, messagetype MessageType, mess
 	}
 	
 	// Discord footer text has a 2048 character limit
-	if len(message) > 2048 {
-		message = message[:2048]
-	}
+	message = truncateUTF8(message, 2048)
 
 	statusChannelID := server.Config.StatusChannelID
 
@@ -484,9 +483,7 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 			Inline: true,
 		}
 		// Discord field value has a 1024 character limit
-		if len(marineTeam.Value) > 1024 {
-			marineTeam.Value = marineTeam.Value[:1024]
-		}
+		marineTeam.Value = truncateUTF8(marineTeam.Value, 1024)
 		fields = append(fields, marineTeam)
 
 		sanitizedAlienPlayers := make([]string, len(info.Teams["2"].Players))
@@ -498,9 +495,7 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 			Value:  "​" + strings.Join(sanitizedAlienPlayers, "\n"),
 			Inline: true,
 		}
-		if len(alienTeam.Value) > 1024 {
-			alienTeam.Value = alienTeam.Value[:1024]
-		}
+		alienTeam.Value = truncateUTF8(alienTeam.Value, 1024)
 		fields = append(fields, alienTeam)
 
 		lineBreak := &discordgo.MessageEmbedField{
@@ -519,9 +514,7 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 			Value:  "​" + strings.Join(sanitizedRRPlayers, "\n"),
 			Inline: true,
 		}
-		if len(rrTeam.Value) > 1024 {
-			rrTeam.Value = rrTeam.Value[:1024]
-		}
+		rrTeam.Value = truncateUTF8(rrTeam.Value, 1024)
 		fields = append(fields, rrTeam)
 
 		sanitizedSpecPlayers := make([]string, len(info.Teams["3"].Players))
@@ -533,9 +526,7 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 			Value:  "​" + strings.Join(sanitizedSpecPlayers, "\n"),
 			Inline: true,
 		}
-		if len(specTeam.Value) > 1024 {
-			specTeam.Value = specTeam.Value[:1024]
-		}
+		specTeam.Value = truncateUTF8(specTeam.Value, 1024)
 		fields = append(fields, specTeam)
 
 		mods := make([]string, 0)
@@ -547,9 +538,7 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 			Value:  "​" + strings.Join(mods[:], "\n"),
 			Inline: false,
 		}
-		if len(modsField.Value) > 1024 {
-			modsField.Value = modsField.Value[:1024]
-		}
+		modsField.Value = truncateUTF8(modsField.Value, 1024)
 		fields = append(fields, modsField)
 	}
 
@@ -557,16 +546,10 @@ func forwardServerStatusToDiscord(server *Server, messagetype MessageType, info 
 	serverName := sanitizeForDiscord(server.Name)
 	serverIpPort := sanitizeForDiscord(info.ServerIp + ":" + strconv.Itoa(info.ServerPort))
 	
-	// Enforce Discord limits
-	if len(serverName) > 256 {
-		serverName = serverName[:256]
-	}
-	if len(description) > 4096 {
-		description = description[:4096]
-	}
-	if len(serverIpPort) > 2048 {
-		serverIpPort = serverIpPort[:2048]
-	}
+	// Enforce Discord limits with safe UTF-8 truncation
+	serverName = truncateUTF8(serverName, 256)
+	description = truncateUTF8(description, 4096)
+	serverIpPort = truncateUTF8(serverIpPort, 2048)
 
 	embed := &discordgo.MessageEmbed{
 		Color: messagetype.getColor(),
