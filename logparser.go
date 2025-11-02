@@ -69,13 +69,18 @@ func findLogFile(logpath string) string {
 		log.Printf("[LogParser] Please check your log_file_path setting in config.toml")
 		log.Printf("[LogParser] The configured path was: %q", logpath)
 		return ""
+	} else if os.IsPermission(err) {
+		log.Printf("[LogParser] ERROR: Permission denied accessing directory: %q", dir)
+		log.Printf("[LogParser] The current user does not have permission to access this directory")
+		log.Printf("[LogParser] Please check file/directory permissions or run as a different user")
+		return ""
 	} else if err != nil {
 		log.Printf("[LogParser] ERROR: Cannot access directory %q: %v", dir, err)
-		log.Printf("[LogParser] This might be a permissions issue")
+		log.Printf("[LogParser] Error type: %T", err)
 		return ""
 	}
 	
-	log.Printf("[LogParser] Directory found - Permissions: %v, Owner: %v", dirInfo.Mode(), dirInfo.Sys())
+	log.Printf("[LogParser] Directory accessible - Permissions: %v", dirInfo.Mode())
 	
 	prefix := dir + string(os.PathSeparator) + "log-Server"
 	log.Printf("[LogParser] Looking for files with prefix: %q", prefix)
