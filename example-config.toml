@@ -26,18 +26,18 @@ web_api_key = "xxxxxx-your-steam-web-api-key" # leave empty to deactivate steam 
 
 [servers]
     [servers.example1]
-    channelID = "1645231543324534623"
+    channelID = "123456789012345678"
     statusChannelID = ""
-    admins = ["Brute#9034", "Wooza#2865", "Las#0029", "125786284395462656"]
-    keyword_notifications = [ ["@admin" "@op"], ["My Admin Role", "Brute#9034", "125786284395462656"], ]
-    muted = ["Sandyclawz#1347"]
+    admins = ["YourDiscordUser#1234", "123456789012345678"]
+    keyword_notifications = [ ["@admin", "@op"], ["My Admin Role", "YourDiscordUser#1234", "123456789012345678"], ]
+    muted = ["MutedUser#5678"]
     server_chat_message_prefix = ""
     server_status_message_prefix = "<:apheriox:298852163759898624> "
-    server_icon_url = "https://cdn.discordapp.com/icons/164863821276512267/9a7f55887cb50e053e1b7b14b86af199.png" # leave empty for guild icon
-    webadmin = "http://127.0.0.1:67142"
-    log_file_path                = "/home/las/.config/Natural Selection 2/log-Server.txt"
+    server_icon_url = "https://cdn.discordapp.com/icons/123456789012345678/example_icon_hash.png" # leave empty for guild icon
+    webadmin = "http://127.0.0.1:8080"
+    log_file_path                = "/path/to/Natural Selection 2/log-Server.txt"
 
     [servers.example2]
-    channelID = "1645231543324534624"
-    webadmin = "http://127.0.0.1:27744"
-    log_file_path                = "/home/las/.config/Natural Selection 2/log-Server-2.txt"
+    channelID = "123456789012345679"
+    webadmin = "http://127.0.0.1:8081"
+    log_file_path                = "/path/to/Natural Selection 2/log-Server-2.txt"

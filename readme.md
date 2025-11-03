@@ -78,7 +78,7 @@ done via HTTP long polling.
    ```toml
    [servers]
          [servers.server1]
-         channelID = "242940165516034049"
+         channelID = "123456789012345678"
    ```
 
 8. Start the discord bridge. <br />
@@ -170,15 +170,15 @@ in Discord type \:apheriox: and it will reply with the id.
 ## Additional Server Config Options
 
 Certain config options require a discord identity. This is a string with either the name of a role ("my role"), the full
-id of a role ("164864561277698048"), the full id of a user ("125786284395462656") or the snowflake id of a user ("
-Brute#9034"). The latter can be acquired by just typing "@Brute" into discord and hitting enter.
+id of a role ("123456789012345678"), the full id of a user ("123456789012345678") or the snowflake id of a user ("
+YourUser#1234"). The latter can be acquired by just typing "@YourUser" into discord and hitting enter.
 
 | Field                        | Value                                           | Description                                                                                                                                                                                                                                                                            |
 |------------------------------|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | statusChannelID              | channelID                                       | ID of a discord channel where all status messages will be mirrored to                                                                                                                                                                                                                  |
 | admins                       | list of discord identities                      | list of discord identities who have admin rights on that server. Admins can mute players and invoke remote commands on the server                                                                                                                                                      |
-| keyword_notifications        | list of [keyword strings], [discord identities] | List of keywords that can be used from within the game to notify certain discord identities. I.e. `[ ["cheater", "@admin" ], ["admins", "Brute#9034"], ]` will alert everyone with the "admins" role and user Brute whenever someone writes "cheater" or "@admin" in the in-game chat. |
-| muted                        | list of discord identities                      | Discord messages of muted players are not forwarded to the game server. There is no warning (shadow ban). You can mute players on the fly with the `!mute @Brute#9034` discord command, but only the players specified in the config will survive a restart of the bot.                |
+| keyword_notifications        | list of [keyword strings], [discord identities] | List of keywords that can be used from within the game to notify certain discord identities. I.e. `[ ["cheater", "@admin" ], ["admins", "YourUser#1234"], ]` will alert everyone with the "admins" role and user YourUser whenever someone writes "cheater" or "@admin" in the in-game chat. |
+| muted                        | list of discord identities                      | Discord messages of muted players are not forwarded to the game server. There is no warning (shadow ban). You can mute players on the fly with the `!mute @YourUser#1234` discord command, but only the players specified in the config will survive a restart of the bot.                |
 | server_chat_message_prefix   | string                                          | Server specific prefix for all chat messages (text message style only)                                                                                                                                                                                                                 |
 | server_status_message_prefix | string                                          | Server specific prefix for all status messages (text message style only)                                                                                                                                                                                                               |
 | server_icon_url              | url string                                      | Icon that is used for status messages (in multiline and online message style). Will default to the discord channel icon when left empty                                                                                                                                                |
