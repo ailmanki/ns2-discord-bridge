@@ -191,7 +191,7 @@ func startLogParser() {
 			log.Printf("[LogParser] '%s': Ready to process new log entries", serverName)
 
 			var slept uint = 0
-			//var filesize int64 = 0
+			var filesize int64 = 0
 			for {
 				line, err := reader.ReadString('\n')
 				if err != nil && len(line) == 0 {
@@ -203,7 +203,7 @@ func startLogParser() {
 
 				if len(line) != 0 {
 					slept = 0
-					//filesize = 0
+					filesize = 0
 					
 					// Check if line contains DISCORD marker
 					if strings.Contains(line, "--DISCORD--") {
@@ -294,50 +294,62 @@ func startLogParser() {
 						log.Printf("[LogParser] '%s': WARNING - DISCORD line did not match any pattern!", serverName)
 						log.Printf("[LogParser] '%s': Regex patterns expecting separator: %q", serverName, fieldSep)
 					}
-				} else if slept >= 5 { // Check if server has restarted
+				} else if slept >= 5 { // Check if server has restarted or log file rotated
 					slept = 0
 
-					/*
-						newlog := findLogFile(logfile)
-						if newlog == currlog {
-							newfile, err := os.Open(currlog)
-							if err != nil {
-								log.Println(err)
-								continue
-							}
-							newstat, err := newfile.Stat()
-							if err != nil {
-								log.Println(err)
-								continue
-							}
-
-							if filesize == 0 {
-								filesize = newstat.Size()
-							} else if newstat.Size() - filesize > 200 || filesize - newstat.Size() > 0 { // It is a new file
-								log.Printf("Server restarted! (size changed, %v != %v)\n", filesize, newstat.Size())
-								filesize = 0
-								file.Close()
-								file   = newfile
-								reader = bufio.NewReader(file)
-								forwardStatusMessageToDiscord(server, MessageType {GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
-							} else {
-								time.Sleep(500 * time.Millisecond)
-								newfile.Close()
-							}
-						} else {
-							currlog = newlog
-							newfile, err := os.Open(currlog)
-							if err != nil {
-								continue
-							}
-							filesize = 0
-							log.Printf("Server restarted! (log file changed, %v != %v)", currlog, newlog)
-							file.Close()
-							file   = newfile
-							reader = bufio.NewReader(file)
-							forwardStatusMessageToDiscord(server, MessageType {GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
+					newlog := findLogFile(logfile)
+					if newlog == "" {
+						log.Printf("[LogParser] '%s': Could not find log file, will retry later", serverName)
+						time.Sleep(500 * time.Millisecond)
+						continue
+					}
+					
+					if newlog == currlog {
+						// Same log file name, check if it was truncated or recreated
+						newfile, err := os.Open(currlog)
+						if err != nil {
+							log.Printf("[LogParser] '%s': Error reopening log file: %v", serverName, err)
+							time.Sleep(500 * time.Millisecond)
+							continue
 						}
-					*/
+						newstat, err := newfile.Stat()
+						if err != nil {
+							log.Printf("[LogParser] '%s': Error stat'ing log file: %v", serverName, err)
+							newfile.Close()
+							time.Sleep(500 * time.Millisecond)
+							continue
+						}
+
+						if filesize == 0 {
+							filesize = newstat.Size()
+							newfile.Close()
+						} else if newstat.Size() < filesize || newstat.Size()-filesize > 10000 { // File was truncated or significantly changed
+							log.Printf("[LogParser] '%s': Log file size changed (old: %d, new: %d), switching to new file", serverName, filesize, newstat.Size())
+							filesize = 0
+							file.Close()
+							file = newfile
+							reader = bufio.NewReader(file)
+							forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
+						} else {
+							filesize = newstat.Size()
+							newfile.Close()
+						}
+					} else {
+						// Different log file name, switch to the new one
+						log.Printf("[LogParser] '%s': Log file changed from %s to %s", serverName, currlog, newlog)
+						currlog = newlog
+						newfile, err := os.Open(currlog)
+						if err != nil {
+							log.Printf("[LogParser] '%s': Error opening new log file: %v", serverName, err)
+							time.Sleep(500 * time.Millisecond)
+							continue
+						}
+						filesize = 0
+						file.Close()
+						file = newfile
+						reader = bufio.NewReader(file)
+						forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
+					}
 				} else {
 					slept += 1
 					time.Sleep(500 * time.Millisecond)
