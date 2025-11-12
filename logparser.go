@@ -191,7 +191,6 @@ func startLogParser() {
 			log.Printf("[LogParser] '%s': Ready to process new log entries", serverName)
 
 			var slept uint = 0
-			var filesize int64 = 0
 			for {
 				line, err := reader.ReadString('\n')
 				if err != nil && len(line) == 0 {
@@ -203,7 +202,6 @@ func startLogParser() {
 
 				if len(line) != 0 {
 					slept = 0
-					filesize = 0
 					
 					// Check if line contains DISCORD marker
 					if strings.Contains(line, "--DISCORD--") {
@@ -297,54 +295,31 @@ func startLogParser() {
 				} else if slept >= 5 { // Check if server has restarted or log file rotated
 					slept = 0
 
-					newlog := findLogFile(logfile)
-					if newlog == "" {
-						log.Printf("[LogParser] '%s': Could not find log file, will retry later", serverName)
+					// Get the file info of the currently open file
+					oldstat, err := file.Stat()
+					if err != nil {
+						log.Printf("[LogParser] '%s': Error stat'ing current file: %v", serverName, err)
 						time.Sleep(500 * time.Millisecond)
 						continue
 					}
-					
-					if newlog == currlog {
-						// Same log file name, check if it was truncated or recreated
-						newfile, err := os.Open(currlog)
-						if err != nil {
-							log.Printf("[LogParser] '%s': Error reopening log file: %v", serverName, err)
-							time.Sleep(500 * time.Millisecond)
-							continue
-						}
-						newstat, err := newfile.Stat()
-						if err != nil {
-							log.Printf("[LogParser] '%s': Error stat'ing log file: %v", serverName, err)
-							newfile.Close()
-							time.Sleep(500 * time.Millisecond)
-							continue
-						}
 
-						if filesize == 0 {
-							filesize = newstat.Size()
-							newfile.Close()
-						} else if newstat.Size() < filesize || newstat.Size()-filesize > 10000 { // File was truncated or significantly changed
-							log.Printf("[LogParser] '%s': Log file size changed (old: %d, new: %d), switching to new file", serverName, filesize, newstat.Size())
-							filesize = 0
-							file.Close()
-							file = newfile
-							reader = bufio.NewReader(file)
-							forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
-						} else {
-							filesize = newstat.Size()
-							newfile.Close()
-						}
-					} else {
-						// Different log file name, switch to the new one
-						log.Printf("[LogParser] '%s': Log file changed from %s to %s", serverName, currlog, newlog)
-						currlog = newlog
+					// Check if the file at the configured path is the same as our open file
+					pathstat, err := os.Stat(currlog)
+					if err != nil {
+						log.Printf("[LogParser] '%s': Error stat'ing path %s: %v", serverName, currlog, err)
+						time.Sleep(500 * time.Millisecond)
+						continue
+					}
+
+					// If the file at the path is different from our open file, it was rotated
+					if !os.SameFile(oldstat, pathstat) {
+						log.Printf("[LogParser] '%s': Log file was rotated, switching to new file at %s", serverName, currlog)
 						newfile, err := os.Open(currlog)
 						if err != nil {
 							log.Printf("[LogParser] '%s': Error opening new log file: %v", serverName, err)
 							time.Sleep(500 * time.Millisecond)
 							continue
 						}
-						filesize = 0
 						file.Close()
 						file = newfile
 						reader = bufio.NewReader(file)
