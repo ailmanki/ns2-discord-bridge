@@ -7,7 +7,7 @@ import (
 	"os/user"
 )
 
-const version = "v6.0.2"
+const version = "v6.0.3"
 
 var configFile string
 
