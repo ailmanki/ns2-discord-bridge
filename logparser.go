@@ -11,7 +11,8 @@ import (
 	"strconv"
 	"time"
 	"path/filepath"
-	"strings"
+	"strings",
+	"io"
 )
 
 const fieldSep = ""
