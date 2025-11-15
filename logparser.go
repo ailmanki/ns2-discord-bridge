@@ -323,7 +323,20 @@ func startLogParser() {
 						file.Close()
 						file = newfile
 						reader = bufio.NewReader(file)
+						
+						// Skip initial content of the new log file to avoid reprocessing old messages
+						log.Printf("[LogParser] '%s': Skipping initial content of rotated log file...", serverName)
+						for {
+							skipLine, _ := reader.ReadString('\n')
+							if len(skipLine) == 0 {
+								break
+							}
+						}
+						log.Printf("[LogParser] '%s': Ready to process new log entries after rotation", serverName)
+						
 						forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
+						// Reset slept counter so we don't immediately check for rotation again
+						slept = 0
 					}
 				} else {
 					slept += 1
