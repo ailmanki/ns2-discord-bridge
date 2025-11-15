@@ -12,6 +12,7 @@ import (
 	"time"
 	"path/filepath"
 	"strings"
+	"io"
 )
 
 const fieldSep = ""
@@ -191,158 +192,161 @@ func startLogParser() {
 			log.Printf("[LogParser] '%s': Ready to process new log entries", serverName)
 
 			var slept uint = 0
-			//var filesize int64 = 0
 			for {
 				line, err := reader.ReadString('\n')
-				if err != nil && len(line) == 0 {
-					// End of file, will retry
-					slept += 1
-					time.Sleep(500 * time.Millisecond)
-					continue
-				}
 
-				if len(line) != 0 {
-					slept = 0
-					//filesize = 0
-					
-					// Check if line contains DISCORD marker
-					if strings.Contains(line, "--DISCORD--") {
-						log.Printf("[LogParser] '%s': Found DISCORD line: %q", serverName, line)
-						
-						// Show the line with visible separators for debugging
-						visibleLine := strings.ReplaceAll(line, "\x1e", "[SEP]")
-						log.Printf("[LogParser] '%s': Line with visible separators: %q", serverName, visibleLine)
-					}
-					
-					if matches := chatRegexp.FindStringSubmatch(line); matches != nil {
-						log.Printf("[LogParser] '%s': Matched CHAT message - Name: %q, SteamID: %q, Team: %q, Message: %q", 
-							serverName, matches[1], matches[2], matches[3], matches[4])
-						log.Printf("[LogParser] '%s': Matched CHAT message - Name: %q, SteamID: %q, Team: %q, Message: %q", 
-							serverName, matches[1], matches[2], matches[3], matches[4])
-						steamid, _ := strconv.ParseInt(matches[2], 10, 32)
-						teamNumber, _ := strconv.Atoi(matches[3])
-						log.Printf("[LogParser] '%s': Forwarding chat message to Discord...", serverName)
-						forwardChatMessageToDiscord(server, matches[1], SteamID3(steamid), TeamNumber(teamNumber), matches[4])
-					} else if matches := statusRegexp.FindStringSubmatch(line); matches != nil {
-						log.Printf("[LogParser] '%s': Matched STATUS message - State: %q, Map: %q, Players: %q", 
-							serverName, matches[1], matches[2], matches[3])
-						gamestate := matches[1]
-						currmap := matches[2]
-						players := matches[3]
-						var message string
-						var msgtype MessageType
-						msgtype.GroupType = "status"
-						switch gamestate {
-						/* These are pretty much useless
-						case "WarmUp":
-							message          = "Warm-up started on "
-							msgtype.SubType = "warmup"
-						case "PreGame":
-							message          = "Pregame started on "
-							msgtype.SubType = "pregame"
-						*/
-						case "Started":
-							message = "Round started on "
-							msgtype.SubType = "roundstart"
-						case "Team1Won":
-							message = "Marines won on "
-							msgtype.SubType = "marinewin"
-						case "Team2Won":
-							message = "Aliens won on "
-							msgtype.SubType = "alienwin"
-						case "Draw":
-							message = "Draw on "
-							msgtype.SubType = "draw"
-						default:
-							continue
-						}
-						log.Printf("[LogParser] '%s': Forwarding status message to Discord: %s", serverName, message+currmap)
-						forwardStatusMessageToDiscord(server, msgtype, message, players, currmap)
-					} else if matches := changemapRegexp.FindStringSubmatch(line); matches != nil {
-						log.Printf("[LogParser] '%s': Matched CHANGEMAP - Map: %q, Players: %q", 
-							serverName, matches[1], matches[2])
-						nextmap := matches[1]
-						players := matches[2]
-						message := "Changing map to "
-						log.Printf("[LogParser] '%s': Forwarding changemap to Discord", serverName)
-						forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "changemap"}, message, players, nextmap)
-					} else if matches := initRegexp.FindStringSubmatch(line); matches != nil {
-						log.Printf("[LogParser] '%s': Matched INIT - Map: %q", serverName, matches[1])
-						currmap := matches[1]
-						message := "Loaded "
-						log.Printf("[LogParser] '%s': Forwarding init to Discord", serverName)
-						forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, message, "", currmap)
-					} else if matches := playerRegexp.FindStringSubmatch(line); matches != nil {
-						log.Printf("[LogParser] '%s': Matched PLAYER event - Action: %q, Name: %q, SteamID: %q, Players: %q", 
-							serverName, matches[1], matches[2], matches[3], matches[4])
-						action := matches[1]
-						name := matches[2]
-						steamid, _ := strconv.ParseInt(matches[3], 10, 32)
-						players := matches[4]
-						msgtype := MessageType{
-							GroupType: "player",
-							SubType:   action,
-						}
-						log.Printf("[LogParser] '%s': Forwarding player event to Discord", serverName)
-						forwardPlayerEventToDiscord(server, msgtype, name, SteamID3(steamid), players)
-					} else if matches := adminprintRegexp.FindStringSubmatch(line); matches != nil {
-						log.Printf("[LogParser] '%s': Matched ADMINPRINT - Message: %q", serverName, matches[1])
-						log.Printf("[LogParser] '%s': Forwarding adminprint to Discord", serverName)
-						forwardStatusMessageToDiscord(server, MessageType{GroupType: "adminprint"}, matches[1], "", "")
-					} else if strings.Contains(line, "--DISCORD--") {
-						// Line contains DISCORD marker but didn't match any pattern
-						log.Printf("[LogParser] '%s': WARNING - DISCORD line did not match any pattern!", serverName)
-						log.Printf("[LogParser] '%s': Regex patterns expecting separator: %q", serverName, fieldSep)
-					}
-				} else if slept >= 5 { // Check if server has restarted
-					slept = 0
+				// --- 1. HANDLE ERRORS AND EOF ---
+				if err != nil {
+					if err == io.EOF {
+						// End of file. This is normal.
+						// Wait a bit, then check for rotation.
+						slept += 1
+						time.Sleep(500 * time.Millisecond)
 
-					/*
-						newlog := findLogFile(logfile)
-						if newlog == currlog {
-							newfile, err := os.Open(currlog)
-							if err != nil {
-								log.Println(err)
-								continue
-							}
-							newstat, err := newfile.Stat()
-							if err != nil {
-								log.Println(err)
-								continue
+						// Check if we've been idle long enough
+						if slept >= 5 {
+							slept = 0 // Reset counter
+
+							// Get the file info of the currently open file handle
+							// (This points to the *renamed* file)
+							oldstat, statErr := file.Stat()
+							if statErr != nil {
+								log.Printf("[LogParser] '%s': Error stat'ing current file handle: %v", serverName, statErr)
+								continue // Try again
 							}
 
-							if filesize == 0 {
-								filesize = newstat.Size()
-							} else if newstat.Size() - filesize > 200 || filesize - newstat.Size() > 0 { // It is a new file
-								log.Printf("Server restarted! (size changed, %v != %v)\n", filesize, newstat.Size())
-								filesize = 0
-								file.Close()
-								file   = newfile
+							// Check the file info at the *original configured path*
+							// (This points to the *new* file)
+							pathstat, pathErr := os.Stat(currlog)
+							if pathErr != nil {
+								log.Printf("[LogParser] '%s': Error stat'ing path %s: %v", serverName, currlog, pathErr)
+								continue // Try again
+							}
+
+							// If they are not the same file, it was rotated!
+							if !os.SameFile(oldstat, pathstat) {
+								log.Printf("[LogParser] '%s': Log file was rotated, switching to new file at %s", serverName, currlog)
+								newfile, openErr := os.Open(currlog)
+								if openErr != nil {
+									log.Printf("[LogParser] '%s': Error opening new log file: %v", serverName, openErr)
+									continue // Try again
+								}
+
+								// Close the old file (server.log.1)
+								file.Close() 
+								
+								// Start using the new file (server.log)
+								file = newfile
 								reader = bufio.NewReader(file)
-								forwardStatusMessageToDiscord(server, MessageType {GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
-							} else {
-								time.Sleep(500 * time.Millisecond)
-								newfile.Close()
+
+								// *** IMPORTANT ***
+								// We do NOT skip content. The new file is empty,
+								// and we want to read it from the beginning.
+								
+								log.Printf("[LogParser] '%s': Ready to process new log entries after rotation", serverName)
+								forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, "Server restarted/log rotated!", "", "")
 							}
-						} else {
-							currlog = newlog
-							newfile, err := os.Open(currlog)
-							if err != nil {
-								continue
-							}
-							filesize = 0
-							log.Printf("Server restarted! (log file changed, %v != %v)", currlog, newlog)
-							file.Close()
-							file   = newfile
-							reader = bufio.NewReader(file)
-							forwardStatusMessageToDiscord(server, MessageType {GroupType: "status", SubType: "init"}, "Server restarted!", "", "")
 						}
-					*/
-				} else {
-					slept += 1
-					time.Sleep(500 * time.Millisecond)
+					} else {
+						// A real error, not just EOF
+						log.Printf("[LogParser] '%s': Error reading log file: %v", serverName, err)
+						time.Sleep(1 * time.Second) // Wait before retrying
+					}
+					
+					// We had an error (EOF or other), so skip line processing
+					continue 
 				}
-			}
+
+				// --- 2. PROCESS A VALID LINE ---
+				// If we get here, err was nil and we have a line.
+				
+				slept = 0 // Reset the idle counter because we got data
+
+				if len(line) == 0 {
+					continue // Skip empty lines that somehow had no error
+				}
+				
+				// (All your parsing logic below remains unchanged)
+
+				// Check if line contains DISCORD marker
+				if strings.Contains(line, "--DISCORD--") {
+					log.Printf("[LogParser] '%s': Found DISCORD line: %q", serverName, line)
+					
+					// Show the line with visible separators for debugging
+					visibleLine := strings.ReplaceAll(line, "\x1e", "[SEP]")
+					log.Printf("[LogParser] '%s': Line with visible separators: %q", serverName, visibleLine)
+				}
+				
+				if matches := chatRegexp.FindStringSubmatch(line); matches != nil {
+					log.Printf("[LogParser] '%s': Matched CHAT message - Name: %q, SteamID: %q, Team: %q, Message: %q", 
+						serverName, matches[1], matches[2], matches[3], matches[4])
+					steamid, _ := strconv.ParseInt(matches[2], 10, 32)
+					teamNumber, _ := strconv.Atoi(matches[3])
+					log.Printf("[LogParser] '%s': Forwarding chat message to Discord...", serverName)
+					forwardChatMessageToDiscord(server, matches[1], SteamID3(steamid), TeamNumber(teamNumber), matches[4])
+				} else if matches := statusRegexp.FindStringSubmatch(line); matches != nil {
+					log.Printf("[LogParser] '%s': Matched STATUS message - State: %q, Map: %q, Players: %q", 
+						serverName, matches[1], matches[2], matches[3])
+					gamestate := matches[1]
+					currmap := matches[2]
+					players := matches[3]
+					var message string
+					var msgtype MessageType
+					msgtype.GroupType = "status"
+					switch gamestate {
+					case "Started":
+						message = "Round started on "
+						msgtype.SubType = "roundstart"
+					case "Team1Won":
+						message = "Marines won on "
+						msgtype.SubType = "marinewin"
+					case "Team2Won":
+						message = "Aliens won on "
+						msgtype.SubType = "alienwin"
+					case "Draw":
+						message = "Draw on "
+						msgtype.SubType = "draw"
+					default:
+						continue
+					}
+					log.Printf("[LogParser] '%s': Forwarding status message to Discord: %s", serverName, message+currmap)
+					forwardStatusMessageToDiscord(server, msgtype, message, players, currmap)
+				} else if matches := changemapRegexp.FindStringSubmatch(line); matches != nil {
+					log.Printf("[LogParser] '%s': Matched CHANGEMAP - Map: %q, Players: %q", 
+						serverName, matches[1], matches[2])
+					nextmap := matches[1]
+					players := matches[2]
+					message := "Changing map to "
+					log.Printf("[LogParser] '%s': Forwarding changemap to Discord", serverName)
+					forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "changemap"}, message, players, nextmap)
+				} else if matches := initRegexp.FindStringSubmatch(line); matches != nil {
+					log.Printf("[LogParser] '%s': Matched INIT - Map: %q", serverName, matches[1])
+					currmap := matches[1]
+					message := "Loaded "
+					log.Printf("[LogParser] '%s': Forwarding init to Discord", serverName)
+					forwardStatusMessageToDiscord(server, MessageType{GroupType: "status", SubType: "init"}, message, "", currmap)
+				} else if matches := playerRegexp.FindStringSubmatch(line); matches != nil {
+					log.Printf("[LogParser] '%s': Matched PLAYER event - Action: %q, Name: %q, SteamID: %q, Players: %q", 
+						serverName, matches[1], matches[2], matches[3], matches[4])
+					action := matches[1]
+					name := matches[2]
+					steamid, _ := strconv.ParseInt(matches[3], 10, 32)
+					players := matches[4]
+					msgtype := MessageType{
+						GroupType: "player",
+						SubType:   action,
+					}
+					log.Printf("[LogParser] '%s': Forwarding player event to Discord", serverName)
+					forwardPlayerEventToDiscord(server, msgtype, name, SteamID3(steamid), players)
+				} else if matches := adminprintRegexp.FindStringSubmatch(line); matches != nil {
+					log.Printf("[LogParser] '%s': Matched ADMINPRINT - Message: %q", serverName, matches[1])
+					log.Printf("[LogParser] '%s': Forwarding adminprint to Discord", serverName)
+					forwardStatusMessageToDiscord(server, MessageType{GroupType: "adminprint"}, matches[1], "", "")
+				} else if strings.Contains(line, "--DISCORD--") {
+					log.Printf("[LogParser] '%s': WARNING - DISCORD line did not match any pattern!", serverName)
+					log.Printf("[LogParser] '%s': Regex patterns expecting separator: %q", serverName, fieldSep)
+				}
+			} // end for
 		}(serverName, server)
 	}
 }
